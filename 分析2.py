@@ -737,37 +737,113 @@ def write_s7(wb, dams, glossary):
 
 
 # ─── メイン ─────────────────────────────────────────────────
+from pathlib import Path
+import glob
+
+def find_input_file(data_dir="data"):
+    """
+    data フォルダ内の xlsx ファイルを自動検索する。
+    「全国ダム地質DB」「Glossary」シートを両方持つファイルを対象とする。
+    複数該当する場合は更新日時が最新のものを使用する。
+    """
+    data_path = Path(data_dir)
+    if not data_path.exists():
+        raise FileNotFoundError(f"dataフォルダが見つかりません: {data_path.resolve()}")
+
+    candidates = sorted(data_path.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise FileNotFoundError(f"dataフォルダ内にxlsxファイルが見つかりません: {data_path.resolve()}")
+
+    for path in candidates:
+        try:
+            from openpyxl import load_workbook as _lw
+            wb = _lw(path, read_only=True)
+            sheets = wb.sheetnames
+            wb.close()
+            if "全国ダム地質DB" in sheets and "Glossary" in sheets:
+                return path
+        except Exception:
+            continue
+
+    msg = "dataフォルダ内に「全国ダム地質DB」と「Glossary」シートを持つxlsxが見つかりません。\n"
+    msg += f"見つかったファイル: {[p.name for p in candidates]}"
+    raise FileNotFoundError(msg)
+
+
 def parse_args():
-    p=argparse.ArgumentParser(description="全国ダム地質DB 統計分析 v2")
-    p.add_argument("--input",  required=True)
-    p.add_argument("--output", required=True)
+    p=argparse.ArgumentParser(
+        description="全国ダム地質DB 統計分析 v2",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "【入力ファイルの指定方法】\n"
+            "  --input を省略すると data/ フォルダを自動検索します。\n"
+            "  「全国ダム地質DB」と「Glossary」シートを持つ最新の xlsx を使用します。\n"
+            "\n例:\n"
+            "  python3 分析2.py                              # data/ を自動検索\n"
+            "  python3 分析2.py --input data/myfile.xlsx     # ファイルを直接指定\n"
+            "  python3 分析2.py --output results/分析.xlsx   # 出力先を指定\n"
+        )
+    )
+    p.add_argument("--input",  default=None, help="入力xlsx（省略時はdataフォルダを自動検索）")
+    p.add_argument("--output", default=None, help="出力xlsx（省略時はdataフォルダに日時付きで保存）")
+    p.add_argument("--data",   default="data", help="自動検索するフォルダ（デフォルト: data）")
     return p.parse_args()
 
+
 def main():
+    import datetime
     args=parse_args()
-    print(f"読み込み: {args.input}")
-    wb=load_workbook(args.input)
-    dams,glossary=load_data(wb)
-    has=[d for d in dams if d["recs"]]
+
+    # 入力ファイルの決定
+    if args.input:
+        input_path = Path(args.input)
+        if not input_path.exists():
+            print(f"エラー: 入力ファイルが見つかりません: {input_path}")
+            sys.exit(1)
+    else:
+        print(f"入力ファイルを {args.data}/ フォルダから自動検索...")
+        input_path = find_input_file(args.data)
+        print(f"  → 使用ファイル: {input_path.name}  (更新: {datetime.datetime.fromtimestamp(input_path.stat().st_mtime).strftime('%Y-%m-%d %H:%M')})")
+
+    # 出力ファイルの決定
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        output_path = Path(args.data) / f"分析結果_{ts}.xlsx"
+
+    print(f"出力先: {output_path}")
+    print(f"読み込み: {input_path}")
+
+    # 入力ファイルからデータを読み込む
+    wb_in = load_workbook(input_path)
+    dams, glossary = load_data(wb_in)
+    has = [d for d in dams if d["recs"]]
     print(f"総ダム数:{len(dams)} / データあり:{len(has)} / Symbol種:{len(set(r['symbol'] for d in has for r in d['recs']))}")
 
-    print("S1 Symbol階層分析...")
-    write_s1(wb,dams,glossary)
-    print("S2 強度透水性マトリクス...")
-    write_s2(wb,dams,glossary)
-    print("S3 Symbol類似グループ...")
-    write_s3(wb,dams,glossary)
-    print("S4 2項目組合せ...")
-    write_s4(wb,dams,glossary)
-    print("S5 北海道60ダム...")
-    write_s5(wb,dams,glossary)
-    print("S6 全国100ダム選定...")
-    write_s6(wb,dams,glossary)
-    print("S7 カバレッジ比較...")
-    write_s7(wb,dams,glossary)
+    # 分析結果を書き込む新規ワークブックを作成
+    from openpyxl import Workbook
+    wb_out = Workbook()
+    wb_out.remove(wb_out.active)  # デフォルトの空シートを削除
 
-    wb.save(args.output)
-    print(f"\n保存完了: {args.output}")
+    print("S1 Symbol階層分析...")
+    write_s1(wb_out, dams, glossary)
+    print("S2 強度透水性マトリクス...")
+    write_s2(wb_out, dams, glossary)
+    print("S3 Symbol類似グループ...")
+    write_s3(wb_out, dams, glossary)
+    print("S4 2項目組合せ...")
+    write_s4(wb_out, dams, glossary)
+    print("S5 北海道60ダム...")
+    write_s5(wb_out, dams, glossary)
+    print("S6 全国100ダム選定...")
+    write_s6(wb_out, dams, glossary)
+    print("S7 カバレッジ比較...")
+    write_s7(wb_out, dams, glossary)
+
+    wb_out.save(output_path)
+    print(f"\n保存完了: {output_path}（分析シートのみの新規ファイル）")
 
 if __name__=="__main__":
     main()
