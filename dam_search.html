@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全国ダム地質分類DB 検索システム</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Share+Tech+Mono&display=swap');
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --surface3: #2d333b;
+  --border: #30363d; --accent: #58a6ff; --accent2: #3fb950; --accent3: #f78166;
+  --accent4: #d2a8ff; --text: #e6edf3; --text2: #8b949e; --text3: #6e7681;
+  --warn: #e3b341; --font: 'Noto Sans JP', sans-serif; --mono: 'Share Tech Mono', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; overflow: hidden; }
+
+/* ── Header ── */
+.header {
+  background: linear-gradient(135deg, #0d1117, #161b22, #0d1117);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px; display: flex; align-items: center; gap: 10px;
+  position: sticky; top: 0; z-index: 200; height: 52px;
+}
+.hi { width: 30px; height: 30px; background: linear-gradient(135deg, var(--accent), var(--accent4)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+.ht { font-size: 16px; font-weight: 700; letter-spacing: .04em; }
+.hs { font-size: 12px; color: var(--text2); font-family: var(--mono); }
+.hstats { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.hbadge { background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; padding: 3px 10px; font-family: var(--mono); font-size: 13px; color: var(--accent2); white-space: nowrap; }
+.hbadge.warn { color: var(--warn); }
+.hbadge.accent { color: var(--accent); }
+
+/* ── File load button ── */
+.file-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; color: var(--text2); cursor: pointer; font-size: 13px; font-family: var(--font); transition: all .15s; white-space: nowrap; }
+.file-btn:hover { border-color: var(--accent); color: var(--accent); }
+#fileInput { display: none; }
+
+/* ── Layout ── */
+.layout { display: grid; grid-template-columns: 290px 1fr; height: calc(100vh - 52px); }
+
+/* ── Sidebar ── */
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sidebar::-webkit-scrollbar { width: 4px; } .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.sec { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.sec-head { background: var(--surface2); padding: 7px 10px; font-size: 12px; font-weight: 700; color: var(--text2); letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.sec-head .icon { font-size: 14px; }
+.sec-head .arr { margin-left: auto; transition: transform .2s; }
+.sec-head.collapsed .arr { transform: rotate(-90deg); }
+.sec-body { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.sec-body.hidden { display: none; }
+
+label.lbl { font-size: 12px; color: var(--text2); margin-bottom: 2px; display: block; }
+input[type=text], select { width: 100%; background: var(--surface3); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 5px 8px; font-size: 13px; font-family: var(--font); outline: none; }
+input[type=text]:focus, select:focus { border-color: var(--accent); }
+select[multiple] { height: auto; min-height: 52px; }
+select option:checked { background: var(--accent); color: #000; }
+
+.range-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 4px; align-items: center; }
+.range-row span { text-align: center; color: var(--text3); font-size: 12px; }
+
+/* Checkbox group */
+.cb-group { display: flex; flex-direction: column; gap: 3px; }
+.cb-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; transition: background .1s; }
+.cb-item:hover { background: var(--surface3); }
+.cb-item input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
+.cb-item .cb-label { font-size: 13px; flex: 1; }
+.cb-item .cb-count { font-size: 11px; font-family: var(--mono); color: var(--text3); }
+
+/* Color chips */
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+/* Reset button */
+.reset-btn { background: none; border: 1px solid var(--border); border-radius: 5px; color: var(--text2); padding: 5px 10px; font-size: 13px; cursor: pointer; width: 100%; font-family: var(--font); transition: all .15s; }
+.reset-btn:hover { border-color: var(--accent3); color: var(--accent3); }
+
+/* ── Main content ── */
+.main { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Toolbar */
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.toolbar-info { font-size: 13px; color: var(--text2); font-family: var(--mono); }
+.toolbar-info strong { color: var(--text); }
+.sort-label { font-size: 12px; color: var(--text3); }
+select.sm-sel { width: auto; min-width: 120px; font-size: 12px; padding: 3px 6px; }
+.ml-auto { margin-left: auto; }
+.page-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text2); padding: 3px 9px; font-size: 13px; cursor: pointer; font-family: var(--font); transition: all .15s; }
+.page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page-btn:disabled { opacity: .4; cursor: default; }
+.page-info { font-size: 13px; color: var(--text2); font-family: var(--mono); }
+
+/* Table */
+.table-wrap { flex: 1; overflow: auto; }
+.table-wrap::-webkit-scrollbar { width: 6px; height: 6px; } .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: var(--surface2); position: sticky; top: 0; z-index: 10; padding: 7px 8px; text-align: left; font-size: 12px; font-weight: 600; color: var(--text2); border-bottom: 2px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+thead th:hover { color: var(--text); }
+thead th.sort-asc::after { content: ' ▲'; color: var(--accent); font-size: 11px; }
+thead th.sort-desc::after { content: ' ▼'; color: var(--accent); font-size: 11px; }
+tbody tr { border-bottom: 1px solid #1c2128; cursor: pointer; transition: background .1s; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr.selected { background: #1f3044 !important; }
+td { padding: 5px 8px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+td.mono { font-family: var(--mono); }
+
+/* Era / Rock / Dual color tags */
+.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+.era-PreN { background: #2d1f4e; color: #d2a8ff; }
+.era-N    { background: #3a3000; color: #e3b341; }
+.era-Qold { background: #3a2000; color: #ffa94d; }
+.era-QH   { background: #0f3050; color: #79c0ff; }
+.rock-GR  { background: #3a1a20; color: #ff9eb0; }
+.rock-MT  { background: #2d1f4e; color: #d2a8ff; }
+.rock-UM  { background: #1a3a22; color: #7ee787; }
+.rock-LS  { background: #0f2d3a; color: #6bd4ea; }
+.rock-SD  { background: #3a2800; color: #e8c98a; }
+.rock-PF  { background: #3a2e00; color: #ffd580; }
+.rock-VL  { background: #3a1e00; color: #ffaa80; }
+.rock-TC  { background: #3a3200; color: #ffe680; }
+.rock-UC  { background: #0f2a3a; color: #79c0ff; }
+.dual-A   { background: #3a0f0f; color: #ff7b7b; border: 1px solid #7a2020; }
+.dual-B   { background: #3a2800; color: #ffcc66; border: 1px solid #7a5000; }
+.dual-N   { background: #0f2a1a; color: #56d364; border: 1px solid #1a5a2a; }
+.rel-B    { color: var(--accent2); } .rel-C { color: var(--warn); } .rel-D { color: var(--accent3); }
+.prop-I   { color: var(--accent4); font-family: var(--mono); font-size: 13px; }
+.prop-II  { color: var(--warn); font-family: var(--mono); font-size: 13px; }
+
+/* Drop zone */
+.drop-zone { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 500; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.drop-zone.active { opacity: 1; pointer-events: all; }
+.drop-box { border: 3px dashed var(--accent); border-radius: 16px; padding: 60px 80px; text-align: center; }
+.drop-box h2 { font-size: 22px; color: var(--accent); margin-bottom: 8px; }
+.drop-box p { color: var(--text2); }
+
+/* Empty / loading states */
+.state-msg { text-align: center; padding: 60px 20px; color: var(--text2); }
+.state-msg .icon { font-size: 48px; margin-bottom: 16px; }
+.state-msg h2 { font-size: 18px; color: var(--text); margin-bottom: 8px; }
+.state-msg p { font-size: 14px; }
+
+/* Detail panel */
+.detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 300; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.detail-overlay.open { opacity: 1; pointer-events: all; }
+.detail-panel { position: fixed; right: 0; top: 0; bottom: 0; width: 520px; background: var(--surface); border-left: 1px solid var(--border); z-index: 301; transform: translateX(100%); transition: transform .25s ease; overflow-y: auto; }
+.detail-panel.open { transform: translateX(0); }
+.detail-panel::-webkit-scrollbar { width: 4px; } .detail-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.dp-head { background: var(--surface2); padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 1; }
+.dp-head h2 { font-size: 17px; font-weight: 700; flex: 1; }
+.dp-close { background: none; border: 1px solid var(--border); border-radius: 5px; color: var(--text2); padding: 4px 10px; cursor: pointer; font-size: 14px; transition: all .15s; }
+.dp-close:hover { border-color: var(--accent3); color: var(--accent3); }
+.dp-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+.dp-sec { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.dp-sec h3 { background: var(--surface2); padding: 6px 12px; font-size: 12px; font-weight: 700; color: var(--text2); letter-spacing: .08em; text-transform: uppercase; }
+.dp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.dp-row { padding: 6px 12px; border-bottom: 1px solid #1c2128; display: flex; flex-direction: column; gap: 2px; }
+.dp-row:last-child { border-bottom: none; }
+.dp-row.full { grid-column: 1/-1; }
+.dp-key { font-size: 11px; color: var(--text3); letter-spacing: .05em; }
+.dp-val { font-size: 14px; color: var(--text); }
+.dp-val.mono { font-family: var(--mono); font-size: 13px; }
+
+/* Loading spinner */
+.spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Stats bar */
+.stats-bar { display: flex; gap: 10px; flex-wrap: wrap; padding: 6px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 50px; }
+.stat-val { font-family: var(--mono); font-size: 14px; font-weight: 700; }
+.stat-lbl { font-size: 11px; color: var(--text3); }
+.stat-sep { width: 1px; background: var(--border); align-self: stretch; }
+</style>
+</head>
+<body>
+
+<!-- Drop zone overlay -->
+<div class="drop-zone" id="dropZone">
+  <div class="drop-box">
+    <h2>📂 ファイルをドロップ</h2>
+    <p>xlsx / xls ファイルをドラッグ＆ドロップしてください</p>
+  </div>
+</div>
+
+<!-- Detail panel -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detailPanel">
+  <div class="dp-head">
+    <h2 id="dpTitle">ダム詳細</h2>
+    <button class="dp-close" onclick="closeDetail()">✕ 閉じる</button>
+  </div>
+  <div class="dp-body" id="dpBody"></div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="hi">🏔</div>
+  <div>
+    <div class="ht">全国ダム地質分類DB</div>
+    <div class="hs">Dam Geological Classification Search System</div>
+  </div>
+  <div class="hstats">
+    <div class="hbadge accent" id="hTotal">— 件</div>
+    <div class="hbadge" id="hFiltered">表示: —</div>
+    <button class="file-btn" onclick="document.getElementById('fileInput').click()">📂 ファイル変更</button>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="loadFile(this.files[0])">
+  </div>
+</div>
+
+<!-- Main layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- テキスト検索 -->
+    <div class="sec">
+      <div class="sec-head" onclick="toggleSec(this)">
+        <span class="icon">🔍</span> テキスト検索 <span class="arr">▾</span>
+      </div>
+      <div class="sec-body">
+        <div>
+          <label class="lbl">ダム名</label>
+          <input type="text" id="fDamName" placeholder="例: 駒込、奥只見…" oninput="applyFilters()">
+        </div>
+        <div>
+          <label class="lbl">水系名</label>
+          <input type="text" id="fSuikei" placeholder="例: 信濃川、利根川…" oninput="applyFilters()">
+        </div>
+        <div>
+          <label class="lbl">河川名</label>
+          <input type="text" id="fRiver" placeholder="例: 只見川…" oninput="applyFilters()">
+        </div>
+      </div>
+    </div>
+
+    <!-- 地域 -->
+    <div class="sec">
+      <div class="sec-head" onclick="toggleSec(this)">
+        <span class="icon">🗾</span> 地域 <span class="arr">▾</span>
+      </div>
+      <div class="sec-body">
+        <div>
+          <label class="lbl">地方整備局</label>
+          <select id="fBureau" onchange="onBureauChange()">
+            <option value="">全国</option>
+            <option value="北海道開発局">北海道開発局</option>
+            <option value="東北地方整備局">東北地方整備局</option>
+            <option value="関東地方整備局">関東地方整備局</option>
+            <option value="北陸地方整備局">北陸地方整備局</option>
+            <option value="中部地方整備局">中部地方整備局</option>
+            <option value="近畿地方整備局">近畿地方整備局</option>
+            <option value="中国地方整備局">中国地方整備局</option>
+            <option value="四国地方整備局">四国地方整備局</option>
+            <option value="九州地方整備局">九州地方整備局</option>
+            <option value="沖縄総合事務局">内閣府沖縄総合事務局</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">都道府県</label>
+          <select id="fPref" onchange="applyFilters()">
+            <option value="">すべて</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ダム属性 -->
+    <div class="sec">
+      <div class="sec-head" onclick="toggleSec(this)">
+        <span class="icon">🏗</span> ダム属性 <span class="arr">▾</span>
+      </div>
+      <div class="sec-body">
+        <div>
+          <label class="lbl">型式</label>
+          <select id="fType" onchange="applyFilters()">
+            <option value="">すべて</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">管理者</label>
+          <select id="fManager" onchange="applyFilters()">
+            <option value="">すべて</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">目的（キーワード）</label>
+          <input type="text" id="fPurpose" placeholder="例: 発電、水道用水…" oninput="applyFilters()">
+        </div>
+        <div>
+          <label class="lbl">堤高 (m)</label>
+          <div class="range-row">
+            <input type="text" id="fHeightMin" placeholder="下限" oninput="applyFilters()" style="text-align:center">
+            <span>〜</span>
+            <input type="text" id="fHeightMax" placeholder="上限" oninput="applyFilters()" style="text-align:center">
+          </div>
+        </div>
+        <div>
+          <label class="lbl">完成年度</label>
+          <div class="range-row">
+            <input type="text" id="fYearMin" placeholder="下限" oninput="applyFilters()" style="text-align:center">
+            <span>〜</span>
+            <input type="text" id="fYearMax" placeholder="上限" oninput="applyFilters()" style="text-align:center">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 地質区分 -->
+    <div class="sec">
+      <div class="sec-head" onclick="toggleSec(this)">
+        <span class="icon">🪨</span> 地質区分 (GeoNAVI-Eng) <span class="arr">▾</span>
+      </div>
+      <div class="sec-body">
+        <div>
+          <label class="lbl">地質区分コード検索（V列・ワイルドカード可）</label>
+          <input type="text" id="fGeoComp" placeholder="例: *GR* かつ *VL*　→ GRとVL両方を含む" oninput="applyFilters()" style="font-family:var(--mono)">
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">* = 任意の文字列　? = 任意の1文字　複数層の区切りは \　複数条件は「かつ」で区切る（AND検索）</div>
+        </div>
+        <div>
+          <label class="lbl">地質時代（全層いずれかに一致）</label>
+          <div class="cb-group" id="cbEra">
+            <label class="cb-item"><input type="checkbox" value="Pre-N" onchange="applyFilters()"><span class="cb-label"><span class="tag era-PreN">Pre-N</span> 古第三紀以前</span><span class="cb-count" id="cnt-era-PreN"></span></label>
+            <label class="cb-item"><input type="checkbox" value="N" onchange="applyFilters()"><span class="cb-label"><span class="tag era-N">N</span> 新第三紀</span><span class="cb-count" id="cnt-era-N"></span></label>
+            <label class="cb-item"><input type="checkbox" value="Q-old" onchange="applyFilters()"><span class="cb-label"><span class="tag era-Qold">Q-old</span> 前〜中期更新世</span><span class="cb-count" id="cnt-era-Qold"></span></label>
+            <label class="cb-item"><input type="checkbox" value="Q-H" onchange="applyFilters()"><span class="cb-label"><span class="tag era-QH">Q-H</span> 後期更新世〜完新世</span><span class="cb-count" id="cnt-era-QH"></span></label>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">岩種（全層いずれかに一致）</label>
+          <div class="cb-group" id="cbRock">
+            <label class="cb-item"><input type="checkbox" value="GR" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-GR">GR</span> 深成岩（花崗岩）</span><span class="cb-count" id="cnt-rock-GR"></span></label>
+            <label class="cb-item"><input type="checkbox" value="MT" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-MT">MT</span> 変成岩</span><span class="cb-count" id="cnt-rock-MT"></span></label>
+            <label class="cb-item"><input type="checkbox" value="UM" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-UM">UM</span> 超苦鉄質岩</span><span class="cb-count" id="cnt-rock-UM"></span></label>
+            <label class="cb-item"><input type="checkbox" value="LS" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-LS">LS</span> 石灰岩・チャート</span><span class="cb-count" id="cnt-rock-LS"></span></label>
+            <label class="cb-item"><input type="checkbox" value="SD" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-SD">SD</span> 砂岩・泥岩</span><span class="cb-count" id="cnt-rock-SD"></span></label>
+            <label class="cb-item"><input type="checkbox" value="PF" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-PF">PF</span> 溶結凝灰岩</span><span class="cb-count" id="cnt-rock-PF"></span></label>
+            <label class="cb-item"><input type="checkbox" value="VL" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-VL">VL</span> 火山溶岩</span><span class="cb-count" id="cnt-rock-VL"></span></label>
+            <label class="cb-item"><input type="checkbox" value="TC" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-TC">TC</span> 凝灰岩・火砕岩</span><span class="cb-count" id="cnt-rock-TC"></span></label>
+            <label class="cb-item"><input type="checkbox" value="UC" onchange="applyFilters()"><span class="cb-label"><span class="tag rock-UC">UC</span> 未固結堆積物</span><span class="cb-count" id="cnt-rock-UC"></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="reset-btn" onclick="resetFilters()">🔄 フィルターをリセット</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <!-- Stats bar -->
+    <div class="stats-bar" id="statsBar" style="display:none">
+      <div class="stat-item"><span class="stat-val" id="st-total" style="color:var(--accent)">—</span><span class="stat-lbl">総件数</span></div>
+      <div class="stat-sep"></div>
+      <div class="stat-item"><span class="stat-val" id="st-preN" style="color:#d2a8ff">—</span><span class="stat-lbl">Pre-N</span></div>
+      <div class="stat-item"><span class="stat-val" id="st-N" style="color:#e3b341">—</span><span class="stat-lbl">N</span></div>
+      <div class="stat-item"><span class="stat-val" id="st-Qold" style="color:#ffa94d">—</span><span class="stat-lbl">Q-old</span></div>
+      <div class="stat-item"><span class="stat-val" id="st-QH" style="color:#79c0ff">—</span><span class="stat-lbl">Q-H</span></div>
+      <div class="stat-sep"></div>
+      <div class="stat-item"><span class="stat-val" id="st-hAvg" style="color:var(--text)">—</span><span class="stat-lbl">平均堤高(m)</span></div>
+      <div class="stat-item"><span class="stat-val" id="st-hMax" style="color:var(--text)">—</span><span class="stat-lbl">最大堤高(m)</span></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <span class="toolbar-info" id="resultInfo">データを読み込んでください</span>
+      <span class="sort-label">並び順:</span>
+      <select class="sm-sel" id="sortCol" onchange="applySort()">
+        <option value="ダム名">ダム名</option>
+        <option value="堤高(m)">堤高</option>
+        <option value="完成年度">完成年度</option>
+        <option value="geo_surface-1">地質区分(L1)</option>
+        <option value="geo_comp">地質区分(全層)</option>
+      </select>
+      <select class="sm-sel" id="sortDir" onchange="applySort()">
+        <option value="asc">昇順 ▲</option>
+        <option value="desc">降順 ▼</option>
+      </select>
+      <span class="ml-auto"></span>
+      <button class="page-btn" id="btnPrev" onclick="changePage(-1)" disabled>◀</button>
+      <span class="page-info" id="pageInfo">—</span>
+      <button class="page-btn" id="btnNext" onclick="changePage(1)" disabled>▶</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap" id="tableWrap">
+      <div class="state-msg" id="stateMsg">
+        <div class="icon">📊</div>
+        <h2>データを読み込んでください</h2>
+        <p>ファイル変更ボタン、またはファイルをドラッグ＆ドロップしてください</p>
+        <br>
+        <p style="color:var(--text3);font-size:13px">data/zendam31_fixed.xlsx を自動読み込み中...</p>
+      </div>
+      <table id="dataTable" style="display:none">
+        <thead>
+          <tr>
+            <th data-col="ダムコード" onclick="thSort('ダムコード')">ダムコード</th>
+            <th data-col="ダム名" onclick="thSort('ダム名')">ダム名</th>
+            <th data-col="所在地" onclick="thSort('所在地')">所在地</th>
+            <th data-col="水系名" onclick="thSort('水系名')">水系名</th>
+            <th data-col="型式" onclick="thSort('型式')">型式</th>
+            <th data-col="堤高(m)" onclick="thSort('堤高(m)')">堤高(m)</th>
+            <th data-col="完成年度" onclick="thSort('完成年度')">完成年</th>
+            <th data-col="geo_comp" onclick="thSort('geo_comp')">地質区分</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ──
+const BUREAU_MAP = {
+  '北海道開発局':   ['北海道'],
+  '東北地方整備局': ['青森県','岩手県','宮城県','秋田県','山形県','福島県'],
+  '関東地方整備局': ['茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','山梨県'],
+  '北陸地方整備局': ['新潟県','富山県','石川県','福井県'],
+  '中部地方整備局': ['長野県','岐阜県','静岡県','愛知県','三重県'],
+  '近畿地方整備局': ['滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県'],
+  '中国地方整備局': ['鳥取県','島根県','岡山県','広島県','山口県'],
+  '四国地方整備局': ['徳島県','香川県','愛媛県','高知県'],
+  '九州地方整備局': ['福岡県','佐賀県','長崎県','熮本県','大分県','宮崎県','鹿児島県'],
+  '沖縄総合事務局': ['沖縄県'],
+};
+// Fix typo in the map above
+BUREAU_MAP['九州地方整備局'] = ['福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県'];
+
+const KNOWN_PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
+
+const PAGE_SIZE = 50;
+
+// ── State ──
+let allData = [];
+let filteredData = [];
+let currentPage = 1;
+let sortColKey = 'ダム名';
+let sortDir = 'asc';
+let selectedRow = null;
+
+// ── Utility ──
+function extractPref(loc) {
+  if (!loc) return '';
+  const s = String(loc);
+  for (const p of KNOWN_PREFS) {
+    if (s.startsWith(p)) return p;
+  }
+  return '';
+}
+
+function getPrefForBureau(bureau) {
+  return BUREAU_MAP[bureau] || [];
+}
+
+function v(d, k) {
+  const val = d[k];
+  return val === null || val === undefined ? '' : String(val);
+}
+
+function n(d, k) {
+  const val = d[k];
+  if (val === null || val === undefined || val === '') return NaN;
+  return parseFloat(val);
+}
+
+// ── File loading ──
+function loadFile(file) {
+  if (!file) return;
+  showLoading('読み込み中: ' + file.name);
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      parseXlsx(e.target.result);
+    } catch (err) {
+      showMsg('❌', 'ファイル読み込みエラー', err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function autoLoad() {
+  showLoading('data/zendam31_fixed.xlsx を読み込み中...');
+  fetch('data/zendam31_fixed.xlsx')
+    .then(r => {
+      if (!r.ok) throw new Error('ファイルが見つかりません');
+      return r.arrayBuffer();
+    })
+    .then(buf => parseXlsx(buf))
+    .catch(() => {
+      showMsg('📂', 'ファイルを選択してください',
+        'ファイル変更ボタンかドラッグ＆ドロップでExcelファイルを開いてください');
+    });
+}
+
+// ── Glossary lookup (for formula cells that xlsx.js cannot evaluate) ──
+function buildGlossaryMap(wb) {
+  const gsName = wb.SheetNames.find(n => /glossary/i.test(n));
+  if (!gsName) return {};
+  const raw = XLSX.utils.sheet_to_json(wb.Sheets[gsName], { header: 1, defval: null });
+  // Find header row containing 'id'
+  let hi = -1;
+  for (let i = 0; i < Math.min(raw.length, 5); i++) {
+    if (raw[i] && raw[i].includes('id')) { hi = i; break; }
+  }
+  if (hi < 0) return {};
+  const hdrs = raw[hi]; // ['id','symbol','geo_surface','geo_era','geo_rock',...]
+  const map = {};
+  // Skip one more row (Japanese label row at hi+1), data from hi+2
+  for (let i = hi + 2; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || row[0] === null || row[0] === undefined) continue;
+    const entry = {};
+    hdrs.forEach((h, j) => { if (h) entry[h] = row[j] !== undefined ? row[j] : null; });
+    map[row[0]] = entry;
+  }
+  return map;
+}
+
+function applyGlossaryLookup(obj, glossaryMap) {
+  const LAYERS = ['1','2','3','4','5'];
+  const FIELDS = ['symbol','geo_surface','geo_era','geo_rock','formationAge_ja','group_ja','lithology_ja','geo_rock_label','bearing_cap','permeability','main_risk'];
+  const geoSurfaces = [];
+  for (const n of LAYERS) {
+    const lid = obj[`凡例ID-${n}`];
+    const entry = (lid && glossaryMap[lid]) ? glossaryMap[lid] : null;
+    if (entry) {
+      FIELDS.forEach(field => {
+        const key = `${field}-${n}`;
+        const cur = obj[key];
+        // Override if null/undefined or is an uncalculated formula string
+        if (cur === null || cur === undefined || (typeof cur === 'string' && cur.startsWith('='))) {
+          obj[key] = entry[field] !== undefined ? entry[field] : null;
+        }
+      });
+    }
+    const gs = obj[`geo_surface-${n}`];
+    if (gs && !(typeof gs === 'string' && gs.startsWith('='))) geoSurfaces.push(gs);
+  }
+  // Recompute geo_comp if empty or formula
+  const curComp = obj['geo_comp'];
+  if ((!curComp || (typeof curComp === 'string' && curComp.startsWith('='))) && geoSurfaces.length > 0) {
+    obj['geo_comp'] = geoSurfaces.join('|');
+  }
+}
+
+function parseXlsx(buf) {
+  const wb = XLSX.read(buf, { type: 'array' });
+  const glossaryMap = buildGlossaryMap(wb);
+
+  // Find sheet with dam data
+  const sheetName = wb.SheetNames.find(n => n.includes('ダム') || n.includes('DB')) || wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  // Find header row (contains gml_id or ダム名)
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(raw.length, 6); i++) {
+    if (raw[i] && (raw[i].includes('gml_id') || raw[i].includes('ダム名'))) {
+      headerIdx = i; break;
+    }
+  }
+  if (headerIdx < 0) { showMsg('❌', 'ヘッダーが見つかりません', '対応フォーマットのExcelファイルを指定してください'); return; }
+
+  const headers = raw[headerIdx];
+  allData = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const row = raw[i];
+    if (!row || row.every(c => c === null)) continue;
+    const obj = {};
+    headers.forEach((h, j) => { if (h) obj[h] = row[j] !== undefined ? row[j] : null; });
+    // Resolve formula cells via Glossary lookup
+    applyGlossaryLookup(obj, glossaryMap);
+    // Precompute prefecture
+    obj._pref = extractPref(obj['所在地']);
+    allData.push(obj);
+  }
+
+  // Populate dynamic selects
+  populateSelects();
+  resetFilters();
+  document.getElementById('hTotal').textContent = allData.length.toLocaleString() + ' 件';
+  document.getElementById('statsBar').style.display = '';
+}
+
+function showLoading(msg) {
+  document.getElementById('stateMsg').innerHTML = `<div class="spinner"></div><h2>${msg}</h2>`;
+  document.getElementById('stateMsg').style.display = 'block';
+  document.getElementById('dataTable').style.display = 'none';
+}
+
+function showMsg(icon, title, sub) {
+  document.getElementById('stateMsg').innerHTML = `<div class="icon">${icon}</div><h2>${title}</h2><p>${sub}</p>`;
+  document.getElementById('stateMsg').style.display = 'block';
+  document.getElementById('dataTable').style.display = 'none';
+}
+
+// ── Populate selects from data ──
+function populateSelects() {
+  const prefs = [...new Set(allData.map(d => d._pref).filter(Boolean))].sort();
+  const prefSel = document.getElementById('fPref');
+  prefSel.innerHTML = '<option value="">すべて</option>';
+  prefs.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; prefSel.appendChild(o); });
+
+  const types = [...new Set(allData.map(d => v(d,'型式')).filter(Boolean))].sort();
+  const typeSel = document.getElementById('fType');
+  typeSel.innerHTML = '<option value="">すべて</option>';
+  types.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; typeSel.appendChild(o); });
+
+  const managers = [...new Set(allData.map(d => v(d,'管理者')).filter(Boolean))].sort();
+  const mgrSel = document.getElementById('fManager');
+  mgrSel.innerHTML = '<option value="">すべて</option>';
+  managers.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; mgrSel.appendChild(o); });
+}
+
+// ── Bureau → Prefecture cascade ──
+function onBureauChange() {
+  const bureau = document.getElementById('fBureau').value;
+  const prefSel = document.getElementById('fPref');
+  const prefs = getPrefForBureau(bureau);
+  if (bureau && prefs.length > 0) {
+    // Select matching prefectures, reset to none first
+    prefSel.value = '';
+    // If exactly one prefecture, auto-select it
+    if (prefs.length === 1) prefSel.value = prefs[0];
+  }
+  applyFilters();
+}
+
+// ── Wildcard matching (glob-style: * = any chars, ? = one char) ──
+function wildcardMatch(pattern, str) {
+  if (!pattern) return true;
+  // Escape regex special chars except * and ?
+  const re = new RegExp(
+    '^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$',
+    'i'
+  );
+  return re.test(str);
+}
+
+// ── Filters ──
+function applyFilters() {
+  const damName  = document.getElementById('fDamName').value.trim().toLowerCase();
+  const suikei   = document.getElementById('fSuikei').value.trim().toLowerCase();
+  const river    = document.getElementById('fRiver').value.trim().toLowerCase();
+  const bureau   = document.getElementById('fBureau').value;
+  const pref     = document.getElementById('fPref').value;
+  const type     = document.getElementById('fType').value;
+  const manager  = document.getElementById('fManager').value;
+  const purpose  = document.getElementById('fPurpose').value.trim().toLowerCase();
+  const geoComp  = document.getElementById('fGeoComp').value.trim();
+  const hMin     = parseFloat(document.getElementById('fHeightMin').value) || null;
+  const hMax     = parseFloat(document.getElementById('fHeightMax').value) || null;
+  const yMin     = parseFloat(document.getElementById('fYearMin').value) || null;
+  const yMax     = parseFloat(document.getElementById('fYearMax').value) || null;
+
+  const bureauPrefs = bureau ? getPrefForBureau(bureau) : null;
+
+  // geo_comp wildcard: 「かつ」で分割し全パターンに一致（AND）
+  let geoPatterns = geoComp
+    ? geoComp.split(/かつ/).map(p => p.trim()).filter(Boolean)
+    : [];
+  geoPatterns = geoPatterns.map(p =>
+    (p && !p.includes('*') && !p.includes('?')) ? '*' + p + '*' : p
+  );
+
+  // Checkbox groups
+  const eras   = getChecked('cbEra');
+  const rocks  = getChecked('cbRock');
+  filteredData = allData.filter(d => {
+    if (damName  && !v(d,'ダム名').toLowerCase().includes(damName)) return false;
+    if (suikei   && !v(d,'水系名').toLowerCase().includes(suikei)) return false;
+    if (river    && !v(d,'河川名').toLowerCase().includes(river)) return false;
+    if (purpose  && !v(d,'目的').toLowerCase().includes(purpose)) return false;
+    if (bureauPrefs && !bureauPrefs.includes(d._pref)) return false;
+    if (pref     && d._pref !== pref) return false;
+    if (type     && v(d,'型式') !== type) return false;
+    if (manager  && v(d,'管理者') !== manager) return false;
+    const h = n(d,'堤高(m)');
+    if (hMin !== null && (isNaN(h) || h < hMin)) return false;
+    if (hMax !== null && (isNaN(h) || h > hMax)) return false;
+    const yr = n(d,'完成年度');
+    if (yMin !== null && (isNaN(yr) || yr < yMin)) return false;
+    if (yMax !== null && (isNaN(yr) || yr > yMax)) return false;
+    // geo_comp ワイルドカード検索（AND: 全パターンに一致）
+    if (geoPatterns.length && !geoPatterns.every(p => wildcardMatch(p, v(d,'geo_comp')))) return false;
+    // 時代・岩種：同一層（同じサフィックス）内でAND一致
+    if (eras.length || rocks.length) {
+      const layerMatch = ['1','2','3','4','5'].some(n => {
+        const eraOk  = !eras.length  || eras.includes(v(d,`geo_era-${n}`));
+        const rockOk = !rocks.length || rocks.includes(v(d,`geo_rock-${n}`));
+        return eraOk && rockOk;
+      });
+      if (!layerMatch) return false;
+    }
+    return true;
+  });
+
+  applySort();
+  updateCounts();
+  updateStats();
+}
+
+function getChecked(groupId) {
+  return [...document.querySelectorAll(`#${groupId} input[type=checkbox]`)].filter(c => c.checked).map(c => c.value);
+}
+
+function resetFilters() {
+  document.getElementById('fDamName').value = '';
+  document.getElementById('fSuikei').value = '';
+  document.getElementById('fRiver').value = '';
+  document.getElementById('fBureau').value = '';
+  document.getElementById('fPref').value = '';
+  document.getElementById('fType').value = '';
+  document.getElementById('fManager').value = '';
+  document.getElementById('fPurpose').value = '';
+  document.getElementById('fGeoComp').value = '';
+  document.getElementById('fHeightMin').value = '';
+  document.getElementById('fHeightMax').value = '';
+  document.getElementById('fYearMin').value = '';
+  document.getElementById('fYearMax').value = '';
+  document.querySelectorAll('.sidebar input[type=checkbox]').forEach(c => c.checked = false);
+  applyFilters();
+}
+
+// ── Sort ──
+function applySort() {
+  const col = sortColKey;
+  const dir = sortDir;
+  filteredData.sort((a, b) => {
+    let av = a[col], bv = b[col];
+    if (av === null || av === undefined) av = '';
+    if (bv === null || bv === undefined) bv = '';
+    const an = parseFloat(av), bn = parseFloat(bv);
+    let cmp = 0;
+    if (!isNaN(an) && !isNaN(bn)) { cmp = an - bn; }
+    else { cmp = String(av).localeCompare(String(bv), 'ja'); }
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  currentPage = 1;
+  renderTable();
+}
+
+function thSort(col) {
+  if (sortColKey === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortColKey = col;
+    sortDir = 'asc';
+  }
+  document.getElementById('sortCol').value = col;
+  document.getElementById('sortDir').value = sortDir;
+  applySort();
+  // Update header classes
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.dataset.col === col) th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+}
+
+document.getElementById('sortCol').onchange = function() { sortColKey = this.value; applySort(); };
+document.getElementById('sortDir').onchange = function() { sortDir = this.value; applySort(); };
+
+// ── Render table ──
+function renderTable() {
+  const total = filteredData.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  currentPage = Math.min(currentPage, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageData = filteredData.slice(start, start + PAGE_SIZE);
+
+  document.getElementById('hFiltered').textContent = '表示: ' + total.toLocaleString();
+  document.getElementById('resultInfo').innerHTML =
+    `<strong>${total.toLocaleString()}</strong> 件 / 全 ${allData.length.toLocaleString()} 件`;
+  document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
+  document.getElementById('btnPrev').disabled = currentPage <= 1;
+  document.getElementById('btnNext').disabled = currentPage >= totalPages;
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  pageData.forEach((d, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = start + i;
+
+    // Build tags for all present layers
+    const layerTags = ['1','2','3','4','5'].map(n => {
+      const era  = v(d,`geo_era-${n}`);
+      const rock = v(d,`geo_rock-${n}`);
+      if (!era && !rock) return '';
+      const et = era  ? `<span class="tag era-${era.replace('-','')}">${era}</span>` : '';
+      const rt = rock ? `<span class="tag rock-${rock}">${rock}</span>` : '';
+      return `<span style="display:inline-flex;gap:2px;align-items:center">${et}${rt}</span>`;
+    }).filter(Boolean).join('<span style="color:var(--text3);font-size:11px;margin:0 2px">╱</span>');
+
+    tr.innerHTML = `
+      <td class="mono">${v(d,'ダムコード') || '—'}</td>
+      <td title="${v(d,'ダム名')}">${v(d,'ダム名') || '—'}</td>
+      <td title="${v(d,'所在地')}" style="max-width:130px">${d._pref || v(d,'所在地').substring(0,10) || '—'}</td>
+      <td title="${v(d,'水系名')}">${v(d,'水系名') || '—'}</td>
+      <td title="${v(d,'型式')}" style="max-width:120px">${shortType(v(d,'型式'))}</td>
+      <td class="mono">${v(d,'堤高(m)') || '—'}</td>
+      <td class="mono">${v(d,'完成年度') || '—'}</td>
+      <td style="max-width:220px">${layerTags || '—'}</td>
+    `;
+    tr.onclick = () => showDetail(d, tr);
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('stateMsg').style.display = 'none';
+  document.getElementById('dataTable').style.display = total > 0 ? '' : 'none';
+  if (total === 0) showMsg('🔍', '該当するダムがありません', 'フィルター条件を変更してください');
+}
+
+function shortType(t) {
+  return t.replace('重力式コンクリートダム','重力式').replace('ロックフィルダム','RFD').replace('アースダム','アース').replace('アーチダム','アーチ').replace('フィルダム','フィル').replace('コンクリートダム','コンクリート');
+}
+function shortLabel(l) {
+  if (!l) return '—';
+  return l.length > 18 ? l.substring(0,18) + '…' : l;
+}
+
+// ── Pagination ──
+function changePage(delta) {
+  currentPage += delta;
+  renderTable();
+}
+
+// ── Count badges ──
+function updateCounts() {
+  // Era counts: 全層にわたって集計（重複なし per ダム）
+  const eraCnt = {};
+  filteredData.forEach(d => {
+    const seen = new Set();
+    ['1','2','3','4','5'].forEach(n => { const e = v(d,`geo_era-${n}`); if (e && !seen.has(e)) { eraCnt[e] = (eraCnt[e]||0)+1; seen.add(e); } });
+  });
+  ['Pre-N','N','Q-old','Q-H'].forEach(e => {
+    const el = document.getElementById('cnt-era-' + e.replace('-',''));
+    if (el) el.textContent = eraCnt[e] ? `(${eraCnt[e]})` : '';
+  });
+
+  // Rock counts: 全層にわたって集計（重複なし per ダム）
+  const rockCnt = {};
+  filteredData.forEach(d => {
+    const seen = new Set();
+    ['1','2','3','4','5'].forEach(n => { const r = v(d,`geo_rock-${n}`); if (r && !seen.has(r)) { rockCnt[r] = (rockCnt[r]||0)+1; seen.add(r); } });
+  });
+  ['GR','MT','UM','LS','SD','PF','VL','TC','UC'].forEach(r => {
+    const el = document.getElementById('cnt-rock-' + r);
+    if (el) el.textContent = rockCnt[r] ? `(${rockCnt[r]})` : '';
+  });
+
+}
+
+function updateStats() {
+  const total = filteredData.length;
+  document.getElementById('st-total').textContent = total.toLocaleString();
+  const eraCnt = {};
+  filteredData.forEach(d => { const e = v(d,'geo_era-1'); eraCnt[e] = (eraCnt[e]||0)+1; });
+  document.getElementById('st-preN').textContent = (eraCnt['Pre-N']||0).toLocaleString();
+  document.getElementById('st-N').textContent = (eraCnt['N']||0).toLocaleString();
+  document.getElementById('st-Qold').textContent = (eraCnt['Q-old']||0).toLocaleString();
+  document.getElementById('st-QH').textContent = (eraCnt['Q-H']||0).toLocaleString();
+  const heights = filteredData.map(d => n(d,'堤高(m)')).filter(h => !isNaN(h));
+  if (heights.length > 0) {
+    document.getElementById('st-hAvg').textContent = (heights.reduce((a,b)=>a+b,0)/heights.length).toFixed(1);
+    document.getElementById('st-hMax').textContent = Math.max(...heights).toFixed(1);
+  } else {
+    document.getElementById('st-hAvg').textContent = '—';
+    document.getElementById('st-hMax').textContent = '—';
+  }
+}
+
+// ── Detail panel ──
+function showDetail(d, tr) {
+  if (selectedRow) selectedRow.classList.remove('selected');
+  selectedRow = tr;
+  tr.classList.add('selected');
+
+  document.getElementById('dpTitle').textContent = v(d,'ダム名') + 'ダム';
+  // Build geological layer HTML
+  const LAYER_LABELS = [
+    '1：新第三紀以前（基礎岩盤）',
+    '2：地質層2',
+    '3：地質層3',
+    '4：地質層4',
+    '5：第四紀層（フィルダムロックゾーン）',
+  ];
+  const LAYER_BORDER = ['#3fb950','#58a6ff','#ffa94d','#c678dd','#e06c75'];
+  function layerHtml(n, label, borderColor) {
+    const era  = v(d,`geo_era-${n}`);
+    const rock = v(d,`geo_rock-${n}`);
+    const gs   = v(d,`geo_surface-${n}`);
+    if (!gs) return '';
+    const eraTag  = era  ? `<span class="tag era-${era.replace('-','')}">${era}</span>` : '';
+    const rockTag = rock ? `<span class="tag rock-${rock}">${rock}</span>` : '';
+    const sym = v(d,`symbol-${n}`);
+    const fa = v(d,`formationAge_ja-${n}`);
+    const gr = v(d,`group_ja-${n}`);
+    const li = v(d,`lithology_ja-${n}`);
+    return `
+    <div class="dp-sec" style="border-color:${borderColor}40">
+      <h3 style="border-left:3px solid ${borderColor};padding-left:8px">Layer ${label}</h3>
+      <div class="dp-grid">
+        <div class="dp-row"><span class="dp-key">地質区分</span><span class="dp-val mono">${gs}</span></div>
+        <div class="dp-row"><span class="dp-key">地質時代 / 岩種</span><span class="dp-val">${eraTag} ${rockTag}</span></div>
+        <div class="dp-row full"><span class="dp-key">岩種名</span><span class="dp-val">${v(d,`geo_rock_label-${n}`)||'—'}</span></div>
+        ${sym ? `<div class="dp-row full"><span class="dp-key">symbol (GeoNAVI)</span><span class="dp-val mono" style="font-size:13px">${sym}</span></div>` : ''}
+        ${fa ? `<div class="dp-row full"><span class="dp-key">形成時代</span><span class="dp-val">${fa}</span></div>` : ''}
+        ${gr ? `<div class="dp-row full"><span class="dp-key">岩石大区分</span><span class="dp-val">${gr}</span></div>` : ''}
+        ${li ? `<div class="dp-row full"><span class="dp-key">岩相</span><span class="dp-val">${li}</span></div>` : ''}
+        <div class="dp-row"><span class="dp-key">支持力</span><span class="dp-val">${v(d,`bearing_cap-${n}`)||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">透水性</span><span class="dp-val">${v(d,`permeability-${n}`)||'—'}</span></div>
+        <div class="dp-row full"><span class="dp-key">主要リスク</span><span class="dp-val">${v(d,`main_risk-${n}`)||'—'}</span></div>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('dpBody').innerHTML = `
+    <div class="dp-sec">
+      <h3>基本情報</h3>
+      <div class="dp-grid">
+        <div class="dp-row"><span class="dp-key">ダムコード</span><span class="dp-val mono">${v(d,'ダムコード')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">gml_id</span><span class="dp-val mono">${v(d,'gml_id')||'—'}</span></div>
+        <div class="dp-row full"><span class="dp-key">所在地</span><span class="dp-val">${v(d,'所在地')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">水系名</span><span class="dp-val">${v(d,'水系名')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">河川名</span><span class="dp-val">${v(d,'河川名')||'—'}</span></div>
+        <div class="dp-row full"><span class="dp-key">型式</span><span class="dp-val">${v(d,'型式')||'—'}</span></div>
+        <div class="dp-row full"><span class="dp-key">目的</span><span class="dp-val">${v(d,'目的')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">堤高 (m)</span><span class="dp-val mono">${v(d,'堤高(m)')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">堤頂長 (m)</span><span class="dp-val mono">${v(d,'堤頂長(m)')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">堤体積 (千m³)</span><span class="dp-val mono">${v(d,'堤体積(千m3)')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">総貯水容量 (千m³)</span><span class="dp-val mono">${v(d,'総貯水容量(千m3)')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">完成年度</span><span class="dp-val mono">${v(d,'完成年度')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">管理者</span><span class="dp-val">${v(d,'管理者')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">緯度</span><span class="dp-val mono">${v(d,'緯度')||'—'}</span></div>
+        <div class="dp-row"><span class="dp-key">経度</span><span class="dp-val mono">${v(d,'経度')||'—'}</span></div>
+      </div>
+    </div>
+
+    <div class="dp-sec">
+      <h3>地質区分サマリ (geo_comp)</h3>
+      <div class="dp-grid">
+        <div class="dp-row full"><span class="dp-key">全層複合コード（V列）</span><span class="dp-val mono" style="font-size:15px;letter-spacing:.05em">${v(d,'geo_comp')||'—'}</span></div>
+      </div>
+    </div>
+
+    ${layerHtml('5', LAYER_LABELS[4], LAYER_BORDER[4])}
+    ${layerHtml('4', LAYER_LABELS[3], LAYER_BORDER[3])}
+    ${layerHtml('3', LAYER_LABELS[2], LAYER_BORDER[2])}
+    ${layerHtml('2', LAYER_LABELS[1], LAYER_BORDER[1])}
+    ${layerHtml('1', LAYER_LABELS[0], LAYER_BORDER[0])}
+
+    <div class="dp-sec">
+      <h3>位置・参照</h3>
+      <div class="dp-grid">
+        <div class="dp-row"><span class="dp-key">位置情報精度</span><span class="dp-val">${v(d,'位置情報精度')||'—'}</span></div>
+        ${v(d,'緯度') && v(d,'経度') ? `<div class="dp-row full"><span class="dp-key">地図で見る</span><span class="dp-val" style="display:flex;gap:12px;flex-wrap:wrap"><a href="https://maps.google.com/?q=${v(d,'緯度')},${v(d,'経度')}" target="_blank" style="color:var(--accent);text-decoration:none">📍 Google Maps ↗</a><a href="https://gbank.gsj.jp/geonavi/geonavi.php?lat=${v(d,'緯度')}&lon=${v(d,'経度')}&z=13" target="_blank" style="color:var(--accent2);text-decoration:none">🪨 地質Navi (AIST) ↗</a></span></div>` : ''}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('detailOverlay').classList.add('open');
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+  document.getElementById('detailPanel').classList.remove('open');
+  if (selectedRow) selectedRow.classList.remove('selected');
+  selectedRow = null;
+}
+
+// ── Section toggle ──
+function toggleSec(head) {
+  head.classList.toggle('collapsed');
+  const body = head.nextElementSibling;
+  body.classList.toggle('hidden');
+}
+
+// ── Drag & Drop ──
+document.addEventListener('dragover', e => {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.add('active');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) document.getElementById('dropZone').classList.remove('active');
+});
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+    loadFile(file);
+  }
+});
+
+// ── Keyboard ──
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDetail();
+  if (e.key === 'ArrowRight' && !document.getElementById('detailPanel').classList.contains('open')) changePage(1);
+  if (e.key === 'ArrowLeft'  && !document.getElementById('detailPanel').classList.contains('open')) changePage(-1);
+});
+
+// ── Init ──
+autoLoad();
+</script>
+</body>
+</html>
