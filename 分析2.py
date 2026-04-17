@@ -4,18 +4,18 @@
 Symbol の1項目・2項目・3項目（地質時代_岩種_修飾子）の類似性に着目し、
 強度（bearing_cap）と透水性（permeability）を中心に分析する。
 
-北海道60ダム = 北海道×国土交通省管理（74件中、データあり上位60件）
-全国100ダム  = 北海道を除く全国から選定（北海道ダムは含まない）
+北海道開発局ダム = 管理者コード=1（国交省）かつ所在地が北海道（件数制限なし）
+全国100ダム     = 北海道を除く全国から選定（北海道ダムは含まない）
 
 追加シート:
-  S1_Symbol階層分析   : 1項目・2項目・3項目別の出現頻度と強度・透水性プロファイル
+  S1_Symbol階層分析      : 1項目・2項目・3項目別の出現頻度と強度・透水性プロファイル
   S2_強度透水性マトリクス : bearing_cap × permeability の地質マトリクス
   S3_Symbol類似グループ  : 1項目共通Symbolの強度・透水性クラスター
-  S4_2項目組合せ      : 2Symbol組合せ × 強度・透水性
-  S5_北海道60ダム     : 北海道×国交省ダムのSymbol構成・強度透水性分析
-  S6_全国100ダム選定  : 北海道除く全国から地質多様性・強度透水性分散を考慮した選定
-  S7_カバレッジ比較   : 北海道60×全国100のSymbolカバレッジギャップ分析
-  S8_北海道開発局ダム : 北海道開発局管理ダム（mgr_code=10）の全件分析
+  S4_2項目組合せ         : 2Symbol組合せ × 強度・透水性
+  S5_北海道開発局ダム    : 北海道開発局ダム（mgr=国交省かつ北海道）のSymbol構成・強度透水性分析
+  S6_全国100ダム選定     : 北海道除く全国から地質多様性・強度透水性分散を考慮した選定
+  S7_カバレッジ比較      : 北海道開発局×全国100のSymbolカバレッジギャップ分析
+  S8_北海道開発局ダム詳細: 北海道開発局ダム vs 全国（北海道以外）Symbol比較
 """
 
 import argparse
@@ -413,31 +413,29 @@ def write_s4(wb, dams, glossary):
     ws.auto_filter.ref=f"A2:{scol(len(hdrs))}2"
 
 
-# ─── S5: 北海道60ダム ───────────────────────────────────────
+# ─── S5: 北海道開発局ダム ────────────────────────────────────
 def write_s5(wb, dams, glossary):
-    ws = wb.create_sheet("S5_北海道60ダム")
+    ws = wb.create_sheet("S5_北海道開発局ダム")
     ws.sheet_view.showGridLines = False
-    sheet_title(ws,1,1,14,"■ 北海道60ダム（国土交通省管理）— Symbol構成・強度透水性分析")
+    sheet_title(ws,1,1,14,"■ 北海道開発局ダム（管理者=国交省かつ北海道）— Symbol構成・強度透水性分析")
 
-    # 北海道×国交省(mgr_code=1)、データありを堤高降順で60件
-    hok = [d for d in dams
-           if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
-    hok_sorted = sorted(hok, key=lambda d: -(d["height"] or 0))
-    hok60 = hok_sorted[:60]
+    # 北海道開発局ダム: 北海道×国交省(mgr_code=1)、データあり全件・件数制限なし
+    hokdev = [d for d in dams
+              if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
+    hokdev_sorted = sorted(hokdev, key=lambda d: -(d["height"] or 0))
 
     row = 2
     # サマリー
-    all_syms_hok = [r["symbol"] for d in hok60 for r in d["recs"]]
+    all_syms_hok = [r["symbol"] for d in hokdev_sorted for r in d["recs"]]
     p1_hok = [sym_parts(s)[0] for s in all_syms_hok]
     p2_hok = [sym_parts(s)[1] for s in all_syms_hok]
-    b_scores_hok = [b_score(r["bearing_cap"]) for d in hok60
+    b_scores_hok = [b_score(r["bearing_cap"]) for d in hokdev_sorted
                     for r in d["recs"] if b_score(r["bearing_cap"])]
-    p_scores_hok = [p_score(r["permeability"]) for d in hok60
+    p_scores_hok = [p_score(r["permeability"]) for d in hokdev_sorted
                     for r in d["recs"] if p_score(r["permeability"])]
 
     summary = [
-        ("対象ダム数（国交省×北海道）", len(hok)),
-        ("選定ダム数（堤高上位60）", len(hok60)),
+        ("北海道開発局ダム数（データあり）", len(hokdev_sorted)),
         ("ユニークSymbol数（3項目）", len(set(all_syms_hok))),
         ("ユニーク1項目数", len(set(p1_hok))),
         ("ユニーク2項目数", len(set(p2_hok))),
@@ -454,7 +452,7 @@ def write_s5(wb, dams, glossary):
     row += 1
 
     # ダム一覧
-    sec_title(ws,row,1,14,"▼ 選定60ダム一覧（堤高降順）")
+    sec_title(ws,row,1,14,f"▼ 北海道開発局ダム一覧（堤高降順・全{len(hokdev_sorted)}件）")
     row += 1
     hdrs=["ダム名","堤高(m)","所在地","Symbol-1","1項目-1","2項目-1",
           "Symbol-2","Symbol-3","Symbol-4","Symbol-5",
@@ -463,7 +461,7 @@ def write_s5(wb, dams, glossary):
     for ci,(h,w) in enumerate(zip(hdrs,widths),1): hdr(ws,row,ci,h,w)
     row += 1
 
-    for d in hok60:
+    for d in hokdev_sorted:
         syms=[r["symbol"] for r in d["recs"]]
         bs=[b_score(r["bearing_cap"]) for r in d["recs"] if b_score(r["bearing_cap"])]
         ps=[p_score(r["permeability"]) for r in d["recs"] if p_score(r["permeability"])]
@@ -486,7 +484,7 @@ def write_s5(wb, dams, glossary):
 
     row += 2
     # Symbol頻度
-    sec_title(ws,row,1,8,"▼ 北海道60ダム Symbol頻度（1項目・2項目・3項目）")
+    sec_title(ws,row,1,8,"▼ 北海道開発局ダム Symbol頻度（1項目・2項目・3項目）")
     row += 1
     for ci,t in enumerate(["1項目","件数","2項目","件数","3項目フル","件数","強度avg","透水性avg"],1):
         sub(ws,row,ci,t,18 if ci in(1,3,5) else 8)
@@ -499,7 +497,6 @@ def write_s5(wb, dams, glossary):
         v1=p1_list[i] if i<len(p1_list) else ("","")
         v2=p2_list[i] if i<len(p2_list) else ("","")
         v3=p3_list[i] if i<len(p3_list) else ("","")
-        # 強度・透水性
         if v3[0]:
             rec=next((r for r in glossary.values() if r["symbol"]==v3[0]),{})
             b_a=b_score(rec.get("bearing_cap","")); p_a=p_score(rec.get("permeability",""))
@@ -522,13 +519,12 @@ def write_s6(wb, dams, glossary):
     non_hok = [d for d in dams
                if not d["pref"].startswith("北海道") and d["recs"]]
 
-    # 北海道60の既カバーSymbol（p1・p2・p3）
-    hok = [d for d in dams
-           if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
-    hok60 = sorted(hok, key=lambda d:-(d["height"] or 0))[:60]
-    hok_p1=set(sym_parts(r["symbol"])[0] for d in hok60 for r in d["recs"])
-    hok_p2=set(sym_parts(r["symbol"])[1] for d in hok60 for r in d["recs"])
-    hok_p3=set(r["symbol"]              for d in hok60 for r in d["recs"])
+    # 北海道開発局の既カバーSymbol（p1・p2・p3）— 件数制限なし
+    hokdev = [d for d in dams
+              if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
+    hok_p1=set(sym_parts(r["symbol"])[0] for d in hokdev for r in d["recs"])
+    hok_p2=set(sym_parts(r["symbol"])[1] for d in hokdev for r in d["recs"])
+    hok_p3=set(r["symbol"]              for d in hokdev for r in d["recs"])
 
     # 全Symbolの全国頻度
     all_sym_cnt=Counter(r["symbol"] for d in dams for r in d["recs"])
@@ -584,7 +580,7 @@ def write_s6(wb, dams, glossary):
         ("ユニーク2項目数",len(sel_p2)),
         ("平均強度スコア",avg(b_all)),
         ("平均透水性スコア",avg(p_all)),
-        ("北海道未カバーSymbol含有",sum(1 for s in sel_p3 if s not in hok_p3)),
+        ("北海道開発局未カバーSymbol含有",sum(1 for s in sel_p3 if s not in hok_p3)),
         ("都道府県数",len(pref_cnt)),
     ]
     ws.column_dimensions["A"].width=28; ws.column_dimensions["B"].width=14
@@ -633,14 +629,13 @@ def write_s6(wb, dams, glossary):
 def write_s7(wb, dams, glossary):
     ws = wb.create_sheet("S7_カバレッジ比較")
     ws.sheet_view.showGridLines = False
-    sheet_title(ws,1,1,14,"■ カバレッジ比較：北海道60 vs 全国100（Symbol・強度透水性ギャップ）")
+    sheet_title(ws,1,1,14,"■ カバレッジ比較：北海道開発局 vs 全国100（Symbol・強度透水性ギャップ）")
 
-    # 北海道60
-    hok=[d for d in dams if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
-    hok60=sorted(hok,key=lambda d:-(d["height"] or 0))[:60]
-    hok_p1=set(sym_parts(r["symbol"])[0] for d in hok60 for r in d["recs"])
-    hok_p2=set(sym_parts(r["symbol"])[1] for d in hok60 for r in d["recs"])
-    hok_p3=set(r["symbol"]              for d in hok60 for r in d["recs"])
+    # 北海道開発局ダム（件数制限なし）
+    hokdev=[d for d in dams if d["pref"].startswith("北海道") and d["mgr_code"]==1 and d["recs"]]
+    hok_p1=set(sym_parts(r["symbol"])[0] for d in hokdev for r in d["recs"])
+    hok_p2=set(sym_parts(r["symbol"])[1] for d in hokdev for r in d["recs"])
+    hok_p3=set(r["symbol"]              for d in hokdev for r in d["recs"])
 
     # 全国100（北海道除く）: S6と同じロジック再計算
     non_hok=[d for d in dams if not d["pref"].startswith("北海道") and d["recs"]]
@@ -651,7 +646,7 @@ def write_s7(wb, dams, glossary):
         return (sum(1.0/all_sym_cnt[s] for s in syms)*2 +
                 sum(1 for p in p1s if p not in hok_p1)*3 +
                 sum(1 for p in p2s if p not in hok_p2)*2 +
-                sum(1 for s in syms if s not in hok_p3)*1)
+                sum(1 for s in syms  if s not in hok_p3)*1)
     candidates=sorted(non_hok,key=lambda d:-score_dam(d))
     sel=[]; pc=Counter()
     for d in candidates:
@@ -675,7 +670,7 @@ def write_s7(wb, dams, glossary):
     # カバレッジサマリー表
     sec_title(ws,row,1,6,"▼ カバレッジサマリー")
     row+=1
-    for ci,t in enumerate(["","北海道60","全国100","北海道60+全国100","全国全体","カバー率(%)"],1):
+    for ci,t in enumerate(["","北海道開発局","全国100","北海道開発局+全国100","全国全体","カバー率(%)"],1):
         sub(ws,row,ci,t,20 if ci==1 else 14)
     row+=1
     metrics=[
@@ -695,7 +690,7 @@ def write_s7(wb, dams, glossary):
     gap_covered=nat_p3-hok_p3
     gap_still=(all_p3-hok_p3)-nat_p3
 
-    sec_title(ws,row,1,10,"▼ 全国100で補完するSymbol（北海道60未カバー → 全国100でカバー）")
+    sec_title(ws,row,1,10,"▼ 全国100で補完するSymbol（北海道開発局未カバー → 全国100でカバー）")
     row+=1
     for ci,t in enumerate(["Symbol","1項目","2項目","geo_era","geo_rock",
                             "全国層数","bearing_cap","permeability","リスクスコア","main_risk"],1):
@@ -716,7 +711,7 @@ def write_s7(wb, dams, glossary):
 
     row+=1
     # 160ダム合計でも未カバーのSymbol
-    sec_title(ws,row,1,10,f"▼ 北海道60+全国100（計160ダム）でも未カバーのSymbol（{len(gap_still)}種）")
+    sec_title(ws,row,1,10,f"▼ 北海道開発局+全国100でも未カバーのSymbol（{len(gap_still)}種）")
     row+=1
     for ci,t in enumerate(["Symbol","1項目","geo_era","geo_rock",
                             "全国層数","bearing_cap","permeability","リスクスコア","main_risk"],1):
@@ -737,23 +732,17 @@ def write_s7(wb, dams, glossary):
     ws.freeze_panes="A3"
 
 
-# ─── S8: 北海道開発局ダム ────────────────────────────────────
-# 管理者コード: 10 = 北海道開発局（国土交通省=1 とは別区分）
-MGR_CODE_HOKKAIDO_DEV = 10
-
+# ─── S8: 北海道開発局ダム詳細・全国比較 ──────────────────────
 def write_s8(wb, dams, glossary):
-    ws = wb.create_sheet("S8_北海道開発局ダム")
+    ws = wb.create_sheet("S8_北海道開発局ダム詳細")
     ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 14, "■ 北海道開発局管理ダム — Symbol構成・強度透水性分析（全件）")
+    sheet_title(ws, 1, 1, 14, "■ 北海道開発局ダム vs 全国（北海道以外）— Symbolカバレッジ比較")
 
-    # 北海道開発局（mgr_code=10）、データあり全件
+    # 北海道開発局ダム（mgr_code=1 かつ 北海道）、データあり全件
     hokdev = [d for d in dams
-              if d["pref"].startswith("北海道")
-              and d["mgr_code"] == MGR_CODE_HOKKAIDO_DEV
-              and d["recs"]]
+              if d["pref"].startswith("北海道") and d["mgr_code"] == 1 and d["recs"]]
     hokdev_all = [d for d in dams
-                  if d["pref"].startswith("北海道")
-                  and d["mgr_code"] == MGR_CODE_HOKKAIDO_DEV]
+                  if d["pref"].startswith("北海道") and d["mgr_code"] == 1]
     hokdev_sorted = sorted(hokdev, key=lambda d: -(d["height"] or 0))
 
     row = 2
@@ -859,17 +848,15 @@ def write_s8(wb, dams, glossary):
 
     row += 2
 
-    # ── 国交省北海道（S5・60ダム）との比較 ──
-    hok_mlit = [d for d in dams
-                if d["pref"].startswith("北海道") and d["mgr_code"] == 1 and d["recs"]]
-    hok60 = sorted(hok_mlit, key=lambda d: -(d["height"] or 0))[:60]
-    hok60_p3 = set(r["symbol"] for d in hok60 for r in d["recs"])
-    hokdev_p3 = set(all_syms)
-    only_dev  = hokdev_p3 - hok60_p3
-    only_mlit = hok60_p3  - hokdev_p3
-    both      = hokdev_p3 & hok60_p3
+    # ── 全国（北海道以外）との比較 ──
+    non_hok_all = [d for d in dams if not d["pref"].startswith("北海道") and d["recs"]]
+    non_hok_p3  = set(r["symbol"] for d in non_hok_all for r in d["recs"])
+    hokdev_p3   = set(all_syms)
+    only_dev    = hokdev_p3 - non_hok_p3   # 北海道開発局のみ保有
+    only_nat    = non_hok_p3 - hokdev_p3   # 全国（北海道以外）のみ保有
+    both        = hokdev_p3 & non_hok_p3   # 共通
 
-    sec_title(ws, row, 1, 6, "▼ 国交省北海道60ダムとのSymbolカバレッジ比較")
+    sec_title(ws, row, 1, 6, "▼ 全国（北海道以外）ダムとのSymbolカバレッジ比較")
     row += 1
     for ci, t in enumerate(["区分", "Symbol数", "うちリスク高(≥6)%", "備考"], 1):
         sub(ws, row, ci, t, 28 if ci == 1 else 14)
@@ -881,11 +868,11 @@ def write_s8(wb, dams, glossary):
         return pct(cnt, len(recs)) if recs else ""
 
     cmp_rows = [
-        ("北海道開発局のみ保有Symbol",   len(only_dev),  risk_high_pct(only_dev),  "国交省60ダムに未登場"),
-        ("国交省60ダムのみ保有Symbol",   len(only_mlit), risk_high_pct(only_mlit), "北海道開発局に未登場"),
-        ("両者共通Symbol",               len(both),      risk_high_pct(both),       "両グループに出現"),
-        ("北海道開発局 合計",            len(hokdev_p3), risk_high_pct(hokdev_p3),  ""),
-        ("国交省北海道60 合計",          len(hok60_p3),  risk_high_pct(hok60_p3),   ""),
+        ("北海道開発局のみ保有Symbol",       len(only_dev), risk_high_pct(only_dev), "全国（北海道以外）に未登場"),
+        ("全国（北海道以外）のみ保有Symbol", len(only_nat), risk_high_pct(only_nat), "北海道開発局に未登場"),
+        ("両者共通Symbol",                   len(both),     risk_high_pct(both),      "両グループに出現"),
+        ("北海道開発局 合計",                len(hokdev_p3),risk_high_pct(hokdev_p3), ""),
+        ("全国（北海道以外）合計",           len(non_hok_p3),risk_high_pct(non_hok_p3),""),
     ]
     for label, cnt, rh, note in cmp_rows:
         fill = ALT_FILL if row % 2 == 0 else None
@@ -899,7 +886,7 @@ def write_s8(wb, dams, glossary):
     # ── 北海道開発局のみ保有Symbol詳細 ──
     if only_dev:
         sec_title(ws, row, 1, 9,
-                  f"▼ 北海道開発局のみ保有Symbol（国交省60ダム未登場）— {len(only_dev)}種")
+                  f"▼ 北海道開発局のみ保有Symbol（全国北海道以外未登場）— {len(only_dev)}種")
         row += 1
         for ci, t in enumerate(["Symbol","1項目","2項目","geo_era","geo_rock",
                                  "全国層数","bearing_cap","permeability","リスクスコア"], 1):
@@ -1023,13 +1010,13 @@ def main():
     write_s3(wb_out, dams, glossary)
     print("S4 2項目組合せ...")
     write_s4(wb_out, dams, glossary)
-    print("S5 北海道60ダム...")
+    print("S5 北海道開発局ダム...")
     write_s5(wb_out, dams, glossary)
     print("S6 全国100ダム選定...")
     write_s6(wb_out, dams, glossary)
     print("S7 カバレッジ比較...")
     write_s7(wb_out, dams, glossary)
-    print("S8 北海道開発局ダム...")
+    print("S8 北海道開発局ダム詳細・全国比較...")
     write_s8(wb_out, dams, glossary)
 
     wb_out.save(output_path)

@@ -1,18 +1,20 @@
 """
-全国ダム地質DB 地質推定可能性分析 v2
+全国ダム地質DB 地質推定可能性分析 v3
 =====================================
-symbol記号に基づく複層地質推定可能性を分析し、データ充実が望ましいダムを提案する。
+北海道開発局ダム（管理者=国交省かつ北海道）のsymbolをリファレンスとして、
+他グループのダムの各symbolが推定可能かどうかを評価し、調査優先ダムを提案する。
 
-A1_北海道地質推定分析     : 北海道ダムの複層地質推定可能性（層別カバレッジ・分布）
-A2_全国地質推定分析       : 北海道以外ダムの複層地質推定可能性（都道府県別内訳付き）
-A3_情報充実推奨100ダム    : symbol空白・不足ダムの優先充実提案リスト（100件）
-A4_管理者別カバレッジ     : 管理者機関ごとの推定可能性（充実優先機関の特定）
-A5_都道府県×地質層マトリクス : 都道府県×Layer カバレッジ熱地図（地域×地質時代の空白可視化）
-A6_層別空白補完分析       : 各地質層ごとの空白補完優先ダム（層単位の充実ターゲット）
+C1_北海道開発局リファレンス  : symbolリファレンスセット（管理者=国交省かつ北海道のダム一覧）
+C2_グループ1推定可能性       : 北海道内・開発局外ダムの各symbolがリファレンスに存在するか評価
+C3_グループ2推定可能性       : 北海道以外ダムの各symbolがリファレンスに存在するか評価
+D1_調査優先ダムリスト        : 未情報symbolを持つダムの優先調査提案（展開価値ベース）
+D2_未掲載Symbol調査効果      : 未掲載symbol別・解決がもたらす推定可能化ダム数の分析
 
-北海道ダム定義 : 所在地が「北海道」で始まるすべてのダム
-全国ダム定義   : 所在地が「北海道」以外のダム
-推定可能性評価 : 0層=推定不可  1〜2層=推定限定的  3〜5層=推定良好
+北海道開発局ダム定義  : 管理者コード=1（国交省）かつ所在地が北海道
+ダムグループ１定義    : 北海道内にある北海道開発局以外のダム
+ダムグループ２定義    : 北海道以外のダム
+推定可能判定          : symbolが北海道開発局リファレンスセットに含まれるか（層位置・セット無関係）
+展開価値              : ある未知symbolが持つ他ダムへの波及効果（同symbolを持つ他ターゲットダム数の合計）
 """
 
 import argparse
@@ -53,7 +55,6 @@ LAYER_NAMES = {
     4: "Layer4: Q-old（中期更新世）",
     5: "Layer5: Q-H（後期更新世〜完新世）",
 }
-LAYER_SHORT = {1: "Pre-N", 2: "N-古", 3: "N-新", 4: "Q-old", 5: "Q-H"}
 
 BEARING_SCORE = {
     "低": 1, "低〜中": 2, "中": 3,
@@ -163,545 +164,534 @@ def load_data(wb):
     return dams, glossary
 
 
-# ─── 推定可能性 ───────────────────────────────────────────────
-def estimability_label(n):
-    if n == 0: return "推定不可"
-    if n <= 2: return "推定限定的"
-    return "推定良好"
+# ─── C系: 北海道開発局リファレンス推定可能性分析 ────────────────
 
-def estimability_fill(n):
-    if n == 0: return RED_FILL
-    if n <= 2: return YEL_FILL
+def build_ref_set(hokdev_dams):
+    """北海道開発局ダムのsymbol全体セット（層位置関係なし）を構築。"""
+    ref_set    = set()
+    ref_detail = defaultdict(list)
+    for d in hokdev_dams:
+        for lnum in range(1, 6):
+            rec = d["layers"][lnum]
+            if rec and rec.get("symbol"):
+                sym = rec["symbol"]
+                ref_set.add(sym)
+                ref_detail[sym].append((d["name"], lnum))
+    return ref_set, ref_detail
+
+
+def _ref_label(n_ok, n_total):
+    if n_total == 0:    return "データなし"
+    if n_ok == n_total: return "全層推定可能"
+    if n_ok == 0:       return "全層推定不可"
+    return "一部推定不可"
+
+
+def _ref_fill_row(n_ok, n_total):
+    if n_total == 0:    return None
+    if n_ok == n_total: return GRN_FILL
+    if n_ok == 0:       return RED_FILL
+    return YEL_FILL
+
+
+def _estimability_fill(layer_count):
+    if layer_count == 0:      return RED_FILL
+    if layer_count <= 2:      return YEL_FILL
     return GRN_FILL
 
-
-# ─── 共通: カバレッジ3セクション（サマリー・層別・層数分布） ──
-def _write_coverage_sections(ws, row, target_dams):
-    total = len(target_dams)
-    with_data = [d for d in target_dams if d["layer_count"] > 0]
-    no_data   = [d for d in target_dams if d["layer_count"] == 0]
-    good      = [d for d in target_dams if d["layer_count"] >= 3]
-    partial   = [d for d in target_dams if 1 <= d["layer_count"] <= 2]
-
-    # ── セクション 1: サマリー ──
-    sec_title(ws, row, 1, 3, "▼ カバレッジサマリー")
-    row += 1
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 10
-    ws.column_dimensions["C"].width = 10
-    for label, val, pct_v in [
-        ("総ダム数",                         total,                                   ""),
-        ("データあり（1層以上）",              len(with_data),                           f"{pct(len(with_data), total)}%"),
-        ("データなし（0層）",                 len(no_data),                             f"{pct(len(no_data), total)}%"),
-        ("推定良好（3層以上）",               len(good),                                f"{pct(len(good), total)}%"),
-        ("推定限定的（1〜2層）",              len(partial),                             f"{pct(len(partial), total)}%"),
-        ("推定不可（0層）",                   len(no_data),                             f"{pct(len(no_data), total)}%"),
-        ("平均層数（全ダム）",               avg([d["layer_count"] for d in target_dams]), ""),
-        ("平均層数（データありダムのみ）",    avg([d["layer_count"] for d in with_data]) if with_data else "", ""),
-    ]:
-        ws.cell(row, 1, label).font = BOLD_FONT
-        ws.cell(row, 1).alignment  = LEFT
-        body(ws, row, 2, val,   align=RIGHT)
-        body(ws, row, 3, pct_v, align=RIGHT)
-        row += 1
-    row += 1
-
-    # ── セクション 2: 層別カバレッジ ──
-    sec_title(ws, row, 1, 7, "▼ 層別カバレッジ（各層にデータを持つダム数）")
-    row += 1
-    for ci, (t, w) in enumerate(zip(
-        ["層番号", "層名", "ダム数", "カバー率(%)", "代表Symbol-1", "代表Symbol-2", "代表Symbol-3"],
-        [8, 30, 8, 12, 18, 18, 18]
-    ), 1):
-        hdr(ws, row, ci, t, w)
-    row += 1
-
-    for lnum in range(1, 6):
-        dams_l = [d for d in target_dams if d["layers"][lnum] is not None]
-        top3 = [s for s, _ in Counter(
-            d["layers"][lnum]["symbol"]
-            for d in dams_l
-            if d["layers"][lnum] and d["layers"][lnum].get("symbol")
-        ).most_common(3)]
-        cr = pct(len(dams_l), total)
-        fill = GRN_FILL if cr >= 40 else YEL_FILL if cr >= 10 else RED_FILL
-        vals = [lnum, LAYER_NAMES[lnum], len(dams_l), cr] + top3 + [""] * (3 - len(top3))
-        for ci, v in enumerate(vals, 1):
-            body(ws, row, ci, v, align=RIGHT if ci in (1, 3, 4) else LEFT, fill=fill)
-        row += 1
-    row += 1
-
-    # ── セクション 3: 層数分布 ──
-    sec_title(ws, row, 1, 5, "▼ 層数別ダム分布（複層推定可能性の全体像）")
-    row += 1
-    for ci, (t, w) in enumerate(zip(
-        ["層数", "件数", "割合(%)", "推定可能性評価", "代表所在地（上位3）"],
-        [8, 8, 10, 16, 40]
-    ), 1):
-        hdr(ws, row, ci, t, w)
-    row += 1
-
-    for lcount in range(6):
-        dams_lc = [d for d in target_dams if d["layer_count"] == lcount]
-        if not dams_lc: continue
-        pref_top3 = "、".join(p for p, _ in Counter(d["pref"] for d in dams_lc).most_common(3))
-        fill = estimability_fill(lcount)
-        for ci, v in enumerate(
-            [lcount, len(dams_lc), pct(len(dams_lc), total), estimability_label(lcount), pref_top3], 1
-        ):
-            body(ws, row, ci, v, align=RIGHT if ci in (1, 2, 3) else LEFT, fill=fill)
-        row += 1
-    row += 1
-
-    return row
+def _estimability_label(layer_count):
+    if layer_count == 0:  return "推定不可"
+    if layer_count <= 2:  return "推定限定的"
+    return "推定良好"
 
 
-# ─── 共通: ダム別詳細テーブル ─────────────────────────────────
-def _write_dam_detail(ws, row, target_dams, section_label=None):
-    total = len(target_dams)
-    label = section_label or f"▼ ダム別詳細一覧（層数降順・堤高降順、全{total}件）"
-    sec_title(ws, row, 1, 13, label)
-    row += 1
-
-    hdrs   = ["ダム名", "所在地", "堤高(m)", "管理者", "層数",
-              "L1-symbol", "L2-symbol", "L3-symbol", "L4-symbol", "L5-symbol",
-              "推定可能性", "平均強度", "平均透水性"]
-    widths = [16, 20, 8, 8, 6, 16, 16, 16, 16, 16, 14, 10, 10]
-    hdr_row = row
-    for ci, (h, w) in enumerate(zip(hdrs, widths), 1):
-        hdr(ws, row, ci, h, w)
-    row += 1
-
-    for d in sorted(target_dams, key=lambda d: (-d["layer_count"], -(d["height"] or 0))):
-        fill = estimability_fill(d["layer_count"])
-        b_avg = avg([b_score(r["bearing_cap"]) for r in d["recs"] if b_score(r["bearing_cap"])])
-        p_avg = avg([p_score(r["permeability"]) for r in d["recs"] if p_score(r["permeability"])])
-        layer_syms = [
-            d["layers"][n]["symbol"] if d["layers"][n] and d["layers"][n].get("symbol") else ""
-            for n in range(1, 6)
-        ]
-        vals = [d["name"], d["loc"][:20] if d["loc"] else "", d["height"],
-                d["mgr_code"], d["layer_count"]] + layer_syms + [
-                estimability_label(d["layer_count"]), b_avg, p_avg]
-        for ci, v in enumerate(vals, 1):
-            body(ws, row, ci, v, align=RIGHT if ci in (3, 4, 5, 12, 13) else LEFT, fill=fill)
-        row += 1
-
-    ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs))}{hdr_row}"
-    return row
-
-
-# ─── A1: 北海道地質推定分析 ─────────────────────────────────
-def write_a1(wb, dams, glossary):
-    ws = wb.create_sheet("A1_北海道地質推定分析")
+# ─── C1: 北海道開発局リファレンス ────────────────────────────
+def write_c1(wb, hokdev_dams, glossary, ref_set, ref_detail):
+    ws = wb.create_sheet("C1_北海道開発局リファレンス")
     ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 13,
-        "■ 北海道ダム 地質複層推定可能性分析（所在地=北海道の全ダム）")
-
-    hok = [d for d in dams if d["pref"].startswith("北海道")]
-    row = _write_coverage_sections(ws, 2, hok)
-    _write_dam_detail(ws, row, hok)
-
-
-# ─── A2: 全国地質推定分析（北海道除く） ─────────────────────
-def write_a2(wb, dams, glossary):
-    ws = wb.create_sheet("A2_全国地質推定分析")
-    ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 13,
-        "■ 全国ダム（北海道除く）地質複層推定可能性分析")
-
-    non_hok = [d for d in dams if not d["pref"].startswith("北海道")]
-    row = _write_coverage_sections(ws, 2, non_hok)
-
-    # ── セクション 4: 都道府県別カバレッジ（A2のみ） ──
-    sec_title(ws, row, 1, 7, "▼ 都道府県別カバレッジ（カバー率昇順）")
-    row += 1
-    for ci, (t, w) in enumerate(zip(
-        ["都道府県", "総ダム数", "データあり", "カバー率(%)", "平均層数", "推定良好(≥3層)", "推定不可(0層)"],
-        [12, 8, 10, 12, 10, 12, 12]
-    ), 1):
-        hdr(ws, row, ci, t, w)
-    row += 1
-
-    pref_dams = defaultdict(list)
-    for d in non_hok:
-        pref_dams[d["pref"]].append(d)
-
-    for pref, pdams in sorted(
-        pref_dams.items(),
-        key=lambda x: pct(sum(1 for d in x[1] if d["layer_count"] > 0), len(x[1]))
-    ):
-        total_p = len(pdams)
-        with_data_p = sum(1 for d in pdams if d["layer_count"] > 0)
-        good_p   = sum(1 for d in pdams if d["layer_count"] >= 3)
-        no_data_p = sum(1 for d in pdams if d["layer_count"] == 0)
-        avg_lc = avg([d["layer_count"] for d in pdams])
-        cr = pct(with_data_p, total_p)
-        fill = GRN_FILL if cr >= 80 else YEL_FILL if cr >= 40 else RED_FILL
-        for ci, v in enumerate(
-            [pref, total_p, with_data_p, cr, avg_lc, good_p, no_data_p], 1
-        ):
-            body(ws, row, ci, v, align=RIGHT if ci > 1 else LEFT, fill=fill)
-        row += 1
-    row += 1
-
-    _write_dam_detail(ws, row, non_hok,
-        section_label=f"▼ ダム別詳細一覧（層数降順・堤高降順、全{len(non_hok)}件）")
-
-
-# ─── A3: 情報充実推奨100ダム ─────────────────────────────────
-def _enrich_reason(d):
-    lc = d["layer_count"]
-    if lc == 0:
-        return "全5層データ未取得 — 最優先充実対象"
-    filled_str = "・".join(LAYER_SHORT[n] for n in sorted(d["filled_layers"]))
-    missing = 5 - lc
-    return f"取得済み: {filled_str}（{lc}/5層）— 残り{missing}層を充実"
-
-
-def write_a3(wb, dams, glossary):
-    ws = wb.create_sheet("A3_情報充実推奨100ダム")
-    ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 13,
-        "■ 情報充実推奨100ダム（北海道除く）— symbol空白・不足ダムの優先リスト")
+    sheet_title(ws, 1, 1, 12,
+        "■ C1 北海道開発局リファレンス — symbolリファレンスセット（管理者=国交省かつ北海道）")
     row = 2
 
-    # ── 選定方針 ──
-    sec_title(ws, row, 1, 13, "▼ 選定方針")
+    total = len(hokdev_dams)
+
+    # ── サマリー ──
+    sec_title(ws, row, 1, 3, "▼ 北海道開発局ダム サマリー")
     row += 1
-    for line in [
-        "対象: 北海道以外のダム（北海道は別途地質情報拡充予定のため除外）",
-        "優先スコア = 不足層数×10 ＋ 堤高ボーナス（height÷5、最大10pt）＋ 管理者ボーナス（国交省/北海道開発局=3pt、その他=1pt）",
-        "  例: 0層・堤高100m・国交省 → 5×10 + 20（cap10） + 3 = 63pt",
-        "地域分散制約: 同一都道府県内から最大4件（100件未満の場合は制限解除して補充）",
-        "目的: symbol空白・少数ダムにフィールド調査・API再実行の優先度を与え、全国地質DBの品質を向上させる",
-    ]:
-        cell = ws.cell(row, 1, line)
-        cell.font = BODY_FONT; cell.alignment = LEFT
-        row += 1
-    row += 1
-
-    # スコアリング（4層以下のダムを対象）
-    candidates_raw = [d for d in dams if not d["pref"].startswith("北海道") and d["layer_count"] < 5]
-    for d in candidates_raw:
-        missing = 5 - d["layer_count"]
-        h_bonus = min((d["height"] or 0) / 5, 10)
-        mgr_bonus = 3 if d["mgr_code"] in (1, 10) else 1
-        d["_enrich_score"] = missing * 10 + h_bonus + mgr_bonus
-
-    candidates = sorted(candidates_raw, key=lambda d: -d["_enrich_score"])
-
-    selected = []
-    pref_cnt = Counter()
-    for d in candidates:
-        if len(selected) >= 100: break
-        if pref_cnt[d["pref"]] < 4:
-            selected.append(d)
-            pref_cnt[d["pref"]] += 1
-
-    if len(selected) < 100:
-        added = {id(d) for d in selected}
-        for d in candidates:
-            if len(selected) >= 100: break
-            if id(d) not in added:
-                selected.append(d)
-                added.add(id(d))
-
-    # ── 選定サマリー ──
-    sec_title(ws, row, 1, 3, "▼ 選定サマリー")
-    row += 1
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 12
     for label, val in [
-        ("選定ダム数",              len(selected)),
-        ("0層（全データ未取得）",   sum(1 for d in selected if d["layer_count"] == 0)),
-        ("1層",                     sum(1 for d in selected if d["layer_count"] == 1)),
-        ("2層",                     sum(1 for d in selected if d["layer_count"] == 2)),
-        ("3層",                     sum(1 for d in selected if d["layer_count"] == 3)),
-        ("4層",                     sum(1 for d in selected if d["layer_count"] == 4)),
-        ("都道府県数",              len(pref_cnt)),
-        ("平均充填済み層数",        avg([d["layer_count"] for d in selected])),
-        ("平均充実スコア",          avg([d["_enrich_score"] for d in selected])),
+        ("北海道開発局ダム数（管理者=国交省かつ北海道）", total),
+        ("リファレンスsymbol数（ユニーク）",              len(ref_set)),
+        ("symbol延べ出現数",                             sum(len(v) for v in ref_detail.values())),
+        ("データあり（1層以上）",                        sum(1 for d in hokdev_dams if d["layer_count"] > 0)),
+        ("データなし（0層）",                            sum(1 for d in hokdev_dams if d["layer_count"] == 0)),
+        ("平均層数",                                     avg([d["layer_count"] for d in hokdev_dams])),
     ]:
         body(ws, row, 1, label, bold=True)
         body(ws, row, 2, val, align=RIGHT)
         row += 1
     row += 1
 
-    # ── 推奨リスト ──
-    sec_title(ws, row, 1, 13, f"▼ 推奨100ダム一覧（充実スコア降順）")
+    # ── ダム一覧 ──
+    sec_title(ws, row, 1, 12, f"▼ 北海道開発局ダム一覧（全{total}件）")
     row += 1
-    hdrs   = ["順位", "ダム名", "都道府県", "堤高(m)", "管理者", "現在層数",
+    hdrs   = ["ダム名", "所在地", "堤高(m)", "層数",
               "L1-symbol", "L2-symbol", "L3-symbol", "L4-symbol", "L5-symbol",
-              "充実スコア", "推奨理由"]
-    widths = [6, 16, 12, 8, 8, 8, 16, 16, 16, 16, 16, 10, 50]
+              "データ充実度", "平均強度", "平均透水性"]
+    widths = [16, 20, 8, 6, 16, 16, 16, 16, 16, 14, 10, 10]
     hdr_row = row
     for ci, (h, w) in enumerate(zip(hdrs, widths), 1):
         hdr(ws, row, ci, h, w)
     row += 1
 
-    for rank, d in enumerate(selected, 1):
-        fill = RED_FILL if d["layer_count"] == 0 else \
-               YEL_FILL if d["layer_count"] <= 2 else \
-               ALT_FILL if row % 2 == 0 else None
-        layer_syms = [
-            d["layers"][n]["symbol"] if d["layers"][n] and d["layers"][n].get("symbol") else ""
-            for n in range(1, 6)
-        ]
-        vals = [rank, d["name"], d["pref"], d["height"], d["mgr_code"],
-                d["layer_count"]] + layer_syms + [
-                round(d["_enrich_score"], 1), _enrich_reason(d)]
+    for d in sorted(hokdev_dams, key=lambda d: (-d["layer_count"], -(d["height"] or 0))):
+        fill  = _estimability_fill(d["layer_count"])
+        b_avg = avg([b_score(r["bearing_cap"])  for r in d["recs"] if b_score(r["bearing_cap"])])
+        p_avg = avg([p_score(r["permeability"]) for r in d["recs"] if p_score(r["permeability"])])
+        syms  = [d["layers"][n]["symbol"] if d["layers"][n] and d["layers"][n].get("symbol") else ""
+                 for n in range(1, 6)]
+        vals  = [d["name"], d["loc"][:20] if d["loc"] else "", d["height"], d["layer_count"]] + \
+                syms + [_estimability_label(d["layer_count"]), b_avg, p_avg]
         for ci, v in enumerate(vals, 1):
-            body(ws, row, ci, v, align=RIGHT if ci in (1, 4, 5, 6, 12) else LEFT, fill=fill)
-        row += 1
-
-    ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs))}{hdr_row}"
-
-
-# ─── A4: 管理者別カバレッジ ──────────────────────────────────
-def write_a4(wb, dams, glossary):
-    ws = wb.create_sheet("A4_管理者別カバレッジ")
-    ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 10,
-        "■ 管理者別 地質推定可能性（北海道除く）— 充実優先機関の特定")
-    row = 2
-
-    non_hok = [d for d in dams if not d["pref"].startswith("北海道")]
-    mgr_dams = defaultdict(list)
-    for d in non_hok:
-        mgr_dams[d["mgr_code"]].append(d)
-
-    # ── サマリー表（カバー率昇順） ──
-    sec_title(ws, row, 1, 10, "▼ 管理者コード別 推定可能性サマリー（カバー率昇順）")
-    row += 1
-    hdrs = ["管理者コード", "総ダム数", "データあり", "カバー率(%)",
-            "推定良好(≥3)", "推定限定的(1-2)", "推定不可(0)",
-            "平均層数", "代表都道府県（上位3）", "代表symbol（上位3）"]
-    widths = [14, 8, 10, 12, 12, 14, 12, 10, 30, 40]
-    hdr_row = row
-    for ci, (h, w) in enumerate(zip(hdrs, widths), 1):
-        hdr(ws, row, ci, h, w)
-    row += 1
-
-    mgr_rows = []
-    for code, mdams in mgr_dams.items():
-        total_m  = len(mdams)
-        with_data = sum(1 for d in mdams if d["layer_count"] > 0)
-        cr       = pct(with_data, total_m)
-        good     = sum(1 for d in mdams if d["layer_count"] >= 3)
-        partial  = sum(1 for d in mdams if 1 <= d["layer_count"] <= 2)
-        no_data  = sum(1 for d in mdams if d["layer_count"] == 0)
-        avg_lc   = avg([d["layer_count"] for d in mdams])
-        pref_top3 = "、".join(p for p, _ in Counter(d["pref"] for d in mdams).most_common(3))
-        sym_top3  = "、".join(s for s, _ in Counter(
-            r["symbol"] for d in mdams for r in d["recs"]
-        ).most_common(3))
-        mgr_rows.append((cr, code, total_m, with_data, good, partial, no_data, avg_lc, pref_top3, sym_top3))
-
-    for cr, code, total_m, with_data, good, partial, no_data, avg_lc, pref_top3, sym_top3 in sorted(mgr_rows):
-        fill = GRN_FILL if cr >= 80 else YEL_FILL if cr >= 40 else RED_FILL
-        for ci, v in enumerate(
-            [code, total_m, with_data, cr, good, partial, no_data, avg_lc, pref_top3, sym_top3], 1
-        ):
-            body(ws, row, ci, v, align=RIGHT if ci in (2, 3, 4, 5, 6, 7, 8) else LEFT, fill=fill)
+            body(ws, row, ci, v, align=RIGHT if ci in (3, 4, 11, 12) else LEFT, fill=fill)
         row += 1
     row += 1
 
-    # ── カバー率最低の上位2管理者: 推定不可ダム一覧 ──
-    worst2 = sorted(
-        [(code, mdams) for code, mdams in mgr_dams.items()
-         if sum(1 for d in mdams if d["layer_count"] == 0) >= 3],
-        key=lambda x: pct(sum(1 for d in x[1] if d["layer_count"] > 0), len(x[1]))
-    )[:2]
-
-    for code, mdams in worst2:
-        gap_dams = sorted(
-            [d for d in mdams if d["layer_count"] == 0],
-            key=lambda d: -(d["height"] or 0)
-        )[:10]
-        cr_m = pct(sum(1 for d in mdams if d["layer_count"] > 0), len(mdams))
-        n_gap = sum(1 for d in mdams if d["layer_count"] == 0)
-        sec_title(ws, row, 1, 7,
-            f"▼ 管理者コード {code}（カバー率 {cr_m}%、推定不可 {n_gap}件）— 堤高上位10件")
-        row += 1
-        for ci, (t, w) in enumerate(zip(
-            ["ダム名", "都道府県", "堤高(m)", "管理者", "層数", "推定可能性", "所在地"],
-            [16, 12, 8, 8, 6, 14, 24]
-        ), 1):
-            sub(ws, row, ci, t, w)
-        row += 1
-        for d in gap_dams:
-            for ci, v in enumerate(
-                [d["name"], d["pref"], d["height"], d["mgr_code"],
-                 d["layer_count"], estimability_label(d["layer_count"]),
-                 d["loc"][:22] if d["loc"] else ""], 1
-            ):
-                body(ws, row, ci, v, align=RIGHT if ci in (3, 4, 5) else LEFT, fill=RED_FILL)
-            row += 1
-        row += 1
-
-    ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs))}{hdr_row}"
-
-
-# ─── A5: 都道府県×地質層 マトリクス ──────────────────────────
-def write_a5(wb, dams, glossary):
-    ws = wb.create_sheet("A5_都道府県×地質層マトリクス")
-    ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 10,
-        "■ 都道府県×地質層 カバレッジマトリクス（北海道除く）")
-    row = 2
-
-    non_hok = [d for d in dams if not d["pref"].startswith("北海道")]
-    pref_dams = defaultdict(list)
-    for d in non_hok:
-        pref_dams[d["pref"]].append(d)
-
-    sec_title(ws, row, 1, 10,
-        "▼ 各セル = Layer充填ダム数（色: 赤=10%未満, 黄=10〜39%, 緑=40%以上 / 行全体色=データあり率）")
-    row += 1
-
-    hdrs = ["都道府県", "総ダム数",
-            "L1: Pre-N", "L2: N-古", "L3: N-新", "L4: Q-old", "L5: Q-H",
-            "平均層数", "データあり率(%)", "推定良好率(%)"]
-    widths = [12, 8, 10, 10, 10, 10, 10, 10, 14, 14]
-    hdr_row = row
-    for ci, (h, w) in enumerate(zip(hdrs, widths), 1):
-        hdr(ws, row, ci, h, w)
-    row += 1
-
-    grand_layer_counts = [0] * 5
-    for pref, pdams in sorted(pref_dams.items(), key=lambda x: -len(x[1])):
-        total_p   = len(pdams)
-        lc_list   = [sum(1 for d in pdams if d["layers"][lnum] is not None) for lnum in range(1, 6)]
-        avg_lc    = avg([d["layer_count"] for d in pdams])
-        cr        = pct(sum(1 for d in pdams if d["layer_count"] > 0), total_p)
-        good_pct  = pct(sum(1 for d in pdams if d["layer_count"] >= 3), total_p)
-        row_fill  = GRN_FILL if cr >= 80 else YEL_FILL if cr >= 40 else RED_FILL
-
-        body(ws, row, 1, pref,    align=LEFT,  fill=row_fill)
-        body(ws, row, 2, total_p, align=RIGHT, fill=row_fill)
-        for ci_off, lcount in enumerate(lc_list, 3):
-            rate = pct(lcount, total_p)
-            cell_fill = GRN_FILL if rate >= 40 else YEL_FILL if rate >= 10 else RED_FILL
-            body(ws, row, ci_off, lcount, align=RIGHT, fill=cell_fill)
-        body(ws, row,  8, avg_lc,   align=RIGHT, fill=row_fill)
-        body(ws, row,  9, cr,       align=RIGHT, fill=row_fill)
-        body(ws, row, 10, good_pct, align=RIGHT, fill=row_fill)
-
-        for i, lc in enumerate(lc_list):
-            grand_layer_counts[i] += lc
-        row += 1
-
-    # 合計行
-    row += 1
-    grand_total = len(non_hok)
-    grand_cr    = pct(sum(1 for d in non_hok if d["layer_count"] > 0), grand_total)
-    grand_good  = pct(sum(1 for d in non_hok if d["layer_count"] >= 3), grand_total)
-    grand_avg   = avg([d["layer_count"] for d in non_hok])
-    sub(ws, row, 1, "合計 / 平均", 12)
-    sub(ws, row, 2, grand_total, 8)
-    for ci_off, lc in enumerate(grand_layer_counts, 3):
-        sub(ws, row, ci_off, lc, 10)
-    sub(ws, row,  8, grand_avg,  10)
-    sub(ws, row,  9, grand_cr,   14)
-    sub(ws, row, 10, grand_good, 14)
-
-    ws.freeze_panes = "C3"
-    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs))}{hdr_row}"
-
-
-# ─── A6: 地質層別 空白補完分析 ────────────────────────────────
-def write_a6(wb, dams, glossary):
-    ws = wb.create_sheet("A6_層別空白補完分析")
-    ws.sheet_view.showGridLines = False
-    sheet_title(ws, 1, 1, 9,
-        "■ 地質層別 空白補完優先分析（北海道除く）— 各層の充実優先ダム TOP20")
-    row = 2
-
-    non_hok = [d for d in dams if not d["pref"].startswith("北海道")]
-    total_non_hok = len(non_hok)
-
-    # ── 層別 空白サマリー ──
-    sec_title(ws, row, 1, 7, "▼ 層別 空白ダム数サマリー")
+    # ── Symbolリファレンス一覧 ──
+    sec_title(ws, row, 1, 5, f"▼ Symbolリファレンス一覧（{len(ref_set)}種、出現頻度降順）")
     row += 1
     for ci, (t, w) in enumerate(zip(
-        ["層番号", "層名", "空白ダム数", "空白率(%)",
-         "うち他層あり（補完可能性あり）", "全層空白（最低優先）", "充填済み代表symbol（上位3）"],
-        [8, 30, 10, 10, 22, 18, 40]
+        ["symbol", "延べ出現数", "出現ダム数", "出現情報（ダム名:層番号）", "地質情報（era / rock / lithology）"],
+        [20, 12, 12, 60, 50]
+    ), 1):
+        hdr(ws, row, ci, t, w)
+    row += 1
+
+    sym_to_glo = {rec["symbol"]: rec for rec in glossary.values() if rec.get("symbol")}
+    for sym, occurrences in sorted(ref_detail.items(), key=lambda x: -len(x[1])):
+        dam_cnt = len(set(name for name, _ in occurrences))
+        occ_str = "  ".join(f"{name}:L{lnum}" for name, lnum in occurrences[:8])
+        glo     = sym_to_glo.get(sym)
+        glo_str = ""
+        if glo:
+            parts = [str(glo.get("geo_era") or ""), str(glo.get("geo_rock") or ""),
+                     str(glo.get("lithology_ja") or "")]
+            glo_str = "  /  ".join(p for p in parts if p)
+        for ci, v in enumerate([sym, len(occurrences), dam_cnt, occ_str, glo_str], 1):
+            body(ws, row, ci, v, align=RIGHT if ci in (2, 3) else LEFT)
+        row += 1
+
+    ws.freeze_panes = "A3"
+    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs))}{hdr_row}"
+
+
+# ─── C2/C3 共通: リファレンスベース推定可能性シート ──────────
+def _write_ref_group(wb, sheet_name, title, target_dams, ref_set, group_label):
+    ws = wb.create_sheet(sheet_name)
+    ws.sheet_view.showGridLines = False
+    sheet_title(ws, 1, 1, 12, title)
+    row = 2
+
+    total = len(target_dams)
+
+    # per-dam 推定可能性を事前計算
+    dam_stats = []
+    for d in target_dams:
+        layer_info = {}
+        n_ok = n_total = 0
+        for lnum in range(1, 6):
+            rec = d["layers"][lnum]
+            if rec is None or not rec.get("symbol"):
+                layer_info[lnum] = (None, None)
+            else:
+                sym = rec["symbol"]
+                est = sym in ref_set
+                layer_info[lnum] = (sym, est)
+                n_total += 1
+                if est: n_ok += 1
+        dam_stats.append({**d, "_li": layer_info, "_n_ok": n_ok, "_n_total": n_total})
+
+    n_all_ok  = sum(1 for d in dam_stats if d["_n_total"] > 0 and d["_n_ok"] == d["_n_total"])
+    n_partial = sum(1 for d in dam_stats if 0 < d["_n_ok"] < d["_n_total"])
+    n_all_ng  = sum(1 for d in dam_stats if d["_n_total"] > 0 and d["_n_ok"] == 0)
+    n_nodata  = sum(1 for d in dam_stats if d["_n_total"] == 0)
+
+    # ── サマリー ──
+    sec_title(ws, row, 1, 4, "▼ 推定可能性サマリー（北海道開発局symbolをリファレンスとした評価）")
+    row += 1
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 10
+    for label, val, pct_v, sfill in [
+        ("総ダム数",                    total,     "",                           None),
+        ("全層推定可能",                n_all_ok,  f"{pct(n_all_ok,  total)}%",  GRN_FILL),
+        ("一部推定不可",                n_partial, f"{pct(n_partial, total)}%",  YEL_FILL),
+        ("全層推定不可（データあり）",  n_all_ng,  f"{pct(n_all_ng,  total)}%",  RED_FILL),
+        ("データなし（0層）",           n_nodata,  f"{pct(n_nodata,  total)}%",  None),
+    ]:
+        body(ws, row, 1, label, bold=True, fill=sfill)
+        body(ws, row, 2, val,   align=RIGHT, fill=sfill)
+        body(ws, row, 3, pct_v, align=RIGHT, fill=sfill)
+        row += 1
+    row += 1
+
+    # ── 層別マッチ率 ──
+    sec_title(ws, row, 1, 6, "▼ 層別リファレンスマッチ率（開発局symbolに対応する割合）")
+    row += 1
+    for ci, (t, w) in enumerate(zip(
+        ["層番号", "層名", "データあり", "マッチ(推定可)", "マッチ率(%)", "非マッチ(推定不可)"],
+        [8, 30, 10, 14, 12, 16]
     ), 1):
         hdr(ws, row, ci, t, w)
     row += 1
 
     for lnum in range(1, 6):
-        missing   = [d for d in non_hok if d["layers"][lnum] is None]
-        has_other = [d for d in missing  if d["layer_count"] > 0]
-        zero_all  = [d for d in missing  if d["layer_count"] == 0]
-        has_layer = [d for d in non_hok  if d["layers"][lnum] is not None]
-        top_syms  = "、".join(s for s, _ in Counter(
-            d["layers"][lnum]["symbol"]
-            for d in has_layer
-            if d["layers"][lnum] and d["layers"][lnum].get("symbol")
-        ).most_common(3))
-        miss_rate = pct(len(missing), total_non_hok)
-        fill = RED_FILL if miss_rate >= 70 else YEL_FILL if miss_rate >= 40 else GRN_FILL
+        with_sym  = [d for d in dam_stats if d["_li"][lnum][0] is not None]
+        match_cnt = sum(1 for d in with_sym if d["_li"][lnum][1])
+        no_match  = len(with_sym) - match_cnt
+        mr = pct(match_cnt, len(with_sym))
+        mfill = GRN_FILL if mr >= 70 else YEL_FILL if mr >= 40 else (RED_FILL if with_sym else None)
         for ci, v in enumerate(
-            [lnum, LAYER_NAMES[lnum], len(missing), miss_rate,
-             len(has_other), len(zero_all), top_syms], 1
+            [lnum, LAYER_NAMES[lnum], len(with_sym), match_cnt, mr, no_match], 1
         ):
-            body(ws, row, ci, v, align=RIGHT if ci in (1, 3, 4, 5, 6) else LEFT, fill=fill)
+            body(ws, row, ci, v,
+                 align=RIGHT if ci in (1, 3, 4, 5, 6) else LEFT,
+                 fill=mfill if ci in (4, 5) else None)
         row += 1
     row += 1
 
-    # ── 各層: 補完優先ダム TOP20 ──
-    # 対象: 当該層が空白 かつ 他に1層以上あるダム（既存データが文脈になる）
-    # スコア: 既存層数×5 + 堤高ボーナス(max10) + 管理者ボーナス
-    for lnum in range(1, 6):
-        candidates = [d for d in non_hok if d["layers"][lnum] is None and d["layer_count"] > 0]
-        top20 = sorted(
-            candidates,
-            key=lambda d: (d["layer_count"] * 5
-                           + min((d["height"] or 0) / 10, 10)
-                           + (3 if d["mgr_code"] in (1, 10) else 1)),
-            reverse=True
-        )[:20]
+    # ── ダム別詳細 ──
+    sec_title(ws, row, 1, 12,
+        f"▼ ダム別詳細（緑=推定可 赤=推定不可 無色=データなし、全{total}件）")
+    row += 1
+    hdrs_c   = ["ダム名", "所在地", "堤高(m)", "管理者", "層数",
+                "L1-symbol", "L2-symbol", "L3-symbol", "L4-symbol", "L5-symbol",
+                "推定可能層数", "全体評価"]
+    widths_c = [16, 20, 8, 8, 6, 16, 16, 16, 16, 16, 12, 14]
+    hdr_row  = row
+    for ci, (h, w) in enumerate(zip(hdrs_c, widths_c), 1):
+        hdr(ws, row, ci, h, w)
+    row += 1
 
-        n_cand = len(candidates)
-        sec_title(ws, row, 1, 9,
-            f"▼ Layer{lnum}: {LAYER_NAMES[lnum]}"
-            f" — 補完優先ダム TOP{min(20, n_cand)}件（対象 {n_cand}件中）")
+    for d in sorted(dam_stats, key=lambda x: (-x["_n_ok"], -(x["height"] or 0))):
+        rfill = _ref_fill_row(d["_n_ok"], d["_n_total"])
+        for ci, v in enumerate(
+            [d["name"], d["loc"][:20] if d["loc"] else "",
+             d["height"], d["mgr_code"], d["layer_count"]], 1
+        ):
+            body(ws, row, ci, v, align=RIGHT if ci in (3, 4, 5) else LEFT, fill=rfill)
+        for li, lnum in enumerate(range(1, 6), 6):
+            sym, est = d["_li"][lnum]
+            cfill = GRN_FILL if est else (RED_FILL if sym else None)
+            body(ws, row, li, sym or "", fill=cfill)
+        body(ws, row, 11, d["_n_ok"],                             align=RIGHT, fill=rfill)
+        body(ws, row, 12, _ref_label(d["_n_ok"], d["_n_total"]),               fill=rfill)
         row += 1
 
-        if not top20:
-            cell = ws.cell(row, 1, "（対象ダムなし）")
-            cell.font = BODY_FONT; cell.alignment = LEFT
-            row += 2
-            continue
+    ws.freeze_panes = "A3"
+    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs_c))}{hdr_row}"
+    row += 1
 
-        hdrs_l  = ["優先順", "ダム名", "都道府県", "堤高(m)", "管理者",
-                   "現在層数", "取得済みLayer（既存symbols）",
-                   "平均強度スコア", "平均透水性スコア"]
-        widths_l = [8, 16, 12, 8, 8, 8, 52, 14, 14]
-        for ci, (h, w) in enumerate(zip(hdrs_l, widths_l), 1):
-            sub(ws, row, ci, h, w)
+    # ── リファレンス未掲載symbol一覧 ──
+    non_match_cnt  = Counter()
+    non_match_pref = defaultdict(set)
+    non_match_name = defaultdict(list)
+    for d in dam_stats:
+        for lnum in range(1, 6):
+            sym, est = d["_li"][lnum]
+            if sym and not est:
+                non_match_cnt[sym] += 1
+                non_match_pref[sym].add(d["pref"])
+                non_match_name[sym].append(d["name"])
+
+    if non_match_cnt:
+        sec_title(ws, row, 1, 5,
+            f"▼ リファレンス未掲載symbol一覧（{group_label}固有・全{len(non_match_cnt)}種、出現頻度降順）")
         row += 1
-
-        for pri, d in enumerate(top20, 1):
-            fill = ALT_FILL if row % 2 == 0 else None
-            filled_str = "  ".join(
-                f"L{n}:{d['layers'][n]['symbol']}"
-                for n in sorted(d["filled_layers"])
-                if d["layers"][n] and d["layers"][n].get("symbol")
-            )
-            b_avg = avg([b_score(r["bearing_cap"])   for r in d["recs"] if b_score(r["bearing_cap"])])
-            p_avg = avg([p_score(r["permeability"]) for r in d["recs"] if p_score(r["permeability"])])
-            vals = [pri, d["name"], d["pref"], d["height"], d["mgr_code"],
-                    d["layer_count"], filled_str, b_avg, p_avg]
-            for ci, v in enumerate(vals, 1):
-                body(ws, row, ci, v, align=RIGHT if ci in (1, 4, 5, 6, 8, 9) else LEFT, fill=fill)
+        for ci, (t, w) in enumerate(zip(
+            ["symbol", "出現ダム数", "出現延べ数", "所在都道府県（上位3）", "代表ダム名（上位3）"],
+            [20, 12, 12, 30, 40]
+        ), 1):
+            hdr(ws, row, ci, t, w)
+        row += 1
+        for sym, cnt in non_match_cnt.most_common(60):
+            dam_cnt = len(set(non_match_name[sym]))
+            prefs   = "、".join(list(non_match_pref[sym])[:3])
+            names   = "、".join(non_match_name[sym][:3])
+            for ci, v in enumerate([sym, dam_cnt, cnt, prefs, names], 1):
+                body(ws, row, ci, v, align=RIGHT if ci in (2, 3) else LEFT, fill=RED_FILL)
             row += 1
+
+
+def write_c2(wb, dams, ref_set):
+    group1 = [d for d in dams
+              if d["pref"].startswith("北海道") and d["mgr_code"] != 1]
+    _write_ref_group(
+        wb,
+        "C2_グループ1推定可能性",
+        "■ C2 ダムグループ１ リファレンス推定可能性（北海道内・北海道開発局以外）",
+        group1, ref_set,
+        "北海道内・開発局外",
+    )
+
+
+def write_c3(wb, dams, ref_set):
+    group2 = [d for d in dams if not d["pref"].startswith("北海道")]
+    _write_ref_group(
+        wb,
+        "C3_グループ2推定可能性",
+        "■ C3 ダムグループ２ リファレンス推定可能性（北海道以外）",
+        group2, ref_set,
+        "北海道以外",
+    )
+
+
+# ─── D1: 調査優先ダムリスト ──────────────────────────────────
+def write_d1(wb, dams, ref_set):
+    ws = wb.create_sheet("D1_調査優先ダムリスト")
+    ws.sheet_view.showGridLines = False
+    sheet_title(ws, 1, 1, 13,
+        "■ D1 調査優先ダムリスト — 未情報symbolを持つダムの優先調査提案（展開価値ベース）")
+    row = 2
+
+    group1 = [d for d in dams if d["pref"].startswith("北海道") and d["mgr_code"] != 1]
+    group2 = [d for d in dams if not d["pref"].startswith("北海道")]
+    targets = [(d, 1) for d in group1] + [(d, 2) for d in group2]
+
+    def unknown_syms_of(d):
+        return [(lnum, d["layers"][lnum]["symbol"])
+                for lnum in range(1, 6)
+                if d["layers"][lnum] and d["layers"][lnum].get("symbol")
+                and d["layers"][lnum]["symbol"] not in ref_set]
+
+    # 全ターゲットダムにわたる未知symbol頻度
+    sym_freq = Counter()
+    for d, _ in targets:
+        for _, sym in unknown_syms_of(d):
+            sym_freq[sym] += 1
+
+    # per-dam スコアリング
+    dam_rows = []
+    for d, grp in targets:
+        unk = unknown_syms_of(d)
+        if not unk:
+            continue
+        known_cnt = sum(
+            1 for lnum in range(1, 6)
+            if d["layers"][lnum] and d["layers"][lnum].get("symbol")
+            and d["layers"][lnum]["symbol"] in ref_set
+        )
+        # 展開価値: 未知symbolを解決したとき恩恵を受ける他ダム数の合計
+        expansion = sum(sym_freq[sym] for _, sym in unk)
+        h_bonus   = min((d["height"] or 0) / 5, 10)
+        mgr_bonus = 3 if d["mgr_code"] in (1, 10) else 1
+        priority  = expansion * 2 + len(unk) * 10 + h_bonus + mgr_bonus
+        dam_rows.append({
+            **d,
+            "_grp":       grp,
+            "_unk":       unk,
+            "_unk_cnt":   len(unk),
+            "_known":     known_cnt,
+            "_expansion": expansion,
+            "_priority":  priority,
+        })
+
+    dam_rows.sort(key=lambda x: -x["_priority"])
+
+    g1_rows = [d for d in dam_rows if d["_grp"] == 1]
+    g2_rows = [d for d in dam_rows if d["_grp"] == 2]
+
+    # ── サマリー ──
+    sec_title(ws, row, 1, 4, "▼ 調査対象サマリー")
+    row += 1
+    for ci, (h, w) in enumerate(zip(["項目", "グループ１", "グループ２", "合計"], [36, 12, 12, 12]), 1):
+        hdr(ws, row, ci, h, w)
+    row += 1
+    g1_total = len(group1)
+    g2_total = len(group2)
+    for label, v1, v2 in [
+        ("グループ内ダム総数",             g1_total, g2_total),
+        ("未知symbolを持つダム数",         len(g1_rows), len(g2_rows)),
+        ("全層推定不可（データなし）",
+            sum(1 for d in g1_rows if d["layer_count"] == 0),
+            sum(1 for d in g2_rows if d["layer_count"] == 0)),
+        ("ユニーク未知symbol数",
+            len(set(sym for d in g1_rows for _, sym in d["_unk"])),
+            len(set(sym for d in g2_rows for _, sym in d["_unk"]))),
+        ("最大展開価値（上位ダム）",
+            max((d["_expansion"] for d in g1_rows), default=0),
+            max((d["_expansion"] for d in g2_rows), default=0)),
+    ]:
+        body(ws, row, 1, label, bold=True)
+        body(ws, row, 2, v1, align=RIGHT)
+        body(ws, row, 3, v2, align=RIGHT)
+        body(ws, row, 4, v1 + v2, align=RIGHT)
+        row += 1
+    row += 1
+
+    # ── 優先スコアの考え方 ──
+    sec_title(ws, row, 1, 13, "▼ 優先スコア算出方法")
+    row += 1
+    ws.column_dimensions["A"].width = 36
+    for line in [
+        "展開価値 = Σ（未知symbolごとに：そのsymbolを持つ他ターゲットダム数）",
+        "  → 調査によってリファレンスが拡充されたとき、恩恵を受ける他ダムの総数に相当する",
+        "優先スコア = 展開価値×2 ＋ 未知symbol数×10 ＋ 堤高ボーナス（height÷5、上限10pt）＋ 管理者ボーナス（国交省/開発局=3、他=1）",
+        "グループ１: 北海道内・開発局以外　　グループ２: 北海道以外",
+        "推奨: 優先スコア上位のダムから調査することで、リファレンス拡充効果が最大化される",
+    ]:
+        cell = ws.cell(row, 1, line); cell.font = BODY_FONT; cell.alignment = LEFT
+        row += 1
+    row += 1
+
+    # ── 優先調査リスト ──
+    sec_title(ws, row, 1, 13,
+        f"▼ 調査優先ダムリスト（優先スコア降順、全{len(dam_rows)}件）")
+    row += 1
+    hdrs_d   = ["順位", "ダム名", "グループ", "所在地", "堤高(m)", "管理者",
+                "層数", "既知sym数", "未知sym数", "展開価値", "優先スコア",
+                "未知symbol一覧（展開頻度）", "既知symbol一覧"]
+    widths_d = [6, 16, 10, 20, 8, 8, 6, 10, 10, 10, 10, 50, 40]
+    hdr_row  = row
+    for ci, (h, w) in enumerate(zip(hdrs_d, widths_d), 1):
+        hdr(ws, row, ci, h, w)
+    row += 1
+
+    for rank, d in enumerate(dam_rows, 1):
+        unk_str   = "  ".join(f"{sym}(×{sym_freq[sym]})" for _, sym in d["_unk"])
+        known_str = "  ".join(
+            d["layers"][lnum]["symbol"]
+            for lnum in range(1, 6)
+            if d["layers"][lnum] and d["layers"][lnum].get("symbol")
+            and d["layers"][lnum]["symbol"] in ref_set
+        )
+        fill = RED_FILL if d["_unk_cnt"] >= 3 else YEL_FILL if d["_unk_cnt"] >= 2 \
+               else ALT_FILL if rank % 2 == 0 else None
+        for ci, v in enumerate([
+            rank, d["name"], f"グループ{d['_grp']}",
+            d["loc"][:18] if d["loc"] else "",
+            d["height"], d["mgr_code"], d["layer_count"],
+            d["_known"], d["_unk_cnt"],
+            d["_expansion"], round(d["_priority"], 1),
+            unk_str, known_str
+        ], 1):
+            body(ws, row, ci, v,
+                 align=RIGHT if ci in (1, 5, 6, 7, 8, 9, 10, 11) else LEFT,
+                 fill=fill)
+        row += 1
+
+    ws.freeze_panes = "A3"
+    ws.auto_filter.ref = f"A{hdr_row}:{scol(len(hdrs_d))}{hdr_row}"
+    row += 1
+
+    # ── 都道府県別集計 ──
+    sec_title(ws, row, 1, 7, "▼ 都道府県別 調査対象サマリー（調査対象ダム数降順）")
+    row += 1
+    for ci, (t, w) in enumerate(zip(
+        ["都道府県", "グループ", "調査対象ダム数", "ユニーク未知sym数",
+         "合計展開価値", "平均優先スコア", "代表ダム（上位3）"],
+        [14, 10, 14, 16, 14, 14, 40]
+    ), 1):
+        hdr(ws, row, ci, t, w)
+    row += 1
+
+    pref_grp = defaultdict(list)
+    for d in dam_rows:
+        pref_grp[(d["pref"], d["_grp"])].append(d)
+
+    for (pref, grp), pdams in sorted(pref_grp.items(), key=lambda x: -len(x[1])):
+        unique_unk = len(set(sym for d in pdams for _, sym in d["_unk"]))
+        total_exp  = sum(d["_expansion"] for d in pdams)
+        avg_pri    = avg([d["_priority"] for d in pdams])
+        top3names  = "、".join(d["name"] for d in pdams[:3])
+        for ci, v in enumerate(
+            [pref, f"グループ{grp}", len(pdams), unique_unk, total_exp, avg_pri, top3names], 1
+        ):
+            body(ws, row, ci, v, align=RIGHT if ci in (3, 4, 5, 6) else LEFT)
+        row += 1
+
+
+# ─── D2: 未掲載Symbol 調査効果分析 ──────────────────────────
+def write_d2(wb, dams, ref_set):
+    ws = wb.create_sheet("D2_未掲載Symbol調査効果")
+    ws.sheet_view.showGridLines = False
+    sheet_title(ws, 1, 1, 8,
+        "■ D2 未掲載Symbol 調査効果分析 — 1symbolの解決がもたらす推定可能化ダム数")
+    row = 2
+
+    group1 = [d for d in dams if d["pref"].startswith("北海道") and d["mgr_code"] != 1]
+    group2 = [d for d in dams if not d["pref"].startswith("北海道")]
+
+    def unk_set(d):
+        return {
+            d["layers"][lnum]["symbol"]
+            for lnum in range(1, 6)
+            if d["layers"][lnum] and d["layers"][lnum].get("symbol")
+            and d["layers"][lnum]["symbol"] not in ref_set
+        }
+
+    g1_unk = {d["name"]: unk_set(d) for d in group1}
+    g2_unk = {d["name"]: unk_set(d) for d in group2}
+
+    all_unk = (set().union(*g1_unk.values()) if g1_unk else set()) | \
+              (set().union(*g2_unk.values()) if g2_unk else set())
+
+    sym_g1_cnt = Counter(sym for s in g1_unk.values() for sym in s)
+    sym_g2_cnt = Counter(sym for s in g2_unk.values() for sym in s)
+
+    # 解決効果: そのsymbolが「最後の未知symbol」だったダム数（= 解決で全層推定可能になるダム数）
+    def resolve_benefit(sym, groups_unk):
+        return sum(1 for s in groups_unk.values() if sym in s and len(s) == 1)
+
+    g1_syms = set().union(*g1_unk.values()) if g1_unk else set()
+    g2_syms = set().union(*g2_unk.values()) if g2_unk else set()
+
+    # ── サマリー ──
+    sec_title(ws, row, 1, 3, "▼ 未掲載symbol サマリー")
+    row += 1
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 12
+    g1_only = g1_syms - g2_syms
+    g2_only = g2_syms - g1_syms
+    common  = g1_syms & g2_syms
+    for label, val in [
+        ("ユニーク未掲載symbol総数（G1+G2）", len(all_unk)),
+        ("G1のみに存在する未掲載symbol",       len(g1_only)),
+        ("G2のみに存在する未掲載symbol",       len(g2_only)),
+        ("G1・G2共通の未掲載symbol",           len(common)),
+    ]:
+        body(ws, row, 1, label, bold=True)
+        body(ws, row, 2, val, align=RIGHT)
+        row += 1
+    row += 1
+
+    # ── symbol別 調査効果一覧 ──
+    sec_title(ws, row, 1, 8,
+        "▼ Symbol別 調査効果一覧（G1+G2合計出現数降順）— この1symbolを解決したとき得られる効果")
+    row += 1
+    for ci, (t, w) in enumerate(zip(
+        ["未掲載symbol", "G1出現ダム数", "G2出現ダム数", "合計出現",
+         "G1解決効果（全層推定可になるダム数）", "G2解決効果", "合計解決効果", "調査優先度評価"],
+        [22, 14, 14, 10, 28, 14, 14, 30]
+    ), 1):
+        hdr(ws, row, ci, t, w)
+    row += 1
+
+    for sym in sorted(all_unk, key=lambda s: -(sym_g1_cnt[s] + sym_g2_cnt[s])):
+        g1c  = sym_g1_cnt[sym]
+        g2c  = sym_g2_cnt[sym]
+        tot  = g1c + g2c
+        g1b  = resolve_benefit(sym, g1_unk)
+        g2b  = resolve_benefit(sym, g2_unk)
+        totb = g1b + g2b
+        if tot >= 10:   reason = "高頻度symbol — 調査価値大"
+        elif totb >= 3: reason = f"解決で{totb}件が全層推定可能に"
+        elif tot >= 3:  reason = "中頻度symbol — 調査推奨"
+        else:           reason = "低頻度・単独出現"
+        fill = GRN_FILL if tot >= 10 else YEL_FILL if tot >= 3 else RED_FILL
+        for ci, v in enumerate([sym, g1c, g2c, tot, g1b, g2b, totb, reason], 1):
+            body(ws, row, ci, v, align=RIGHT if ci in (2, 3, 4, 5, 6, 7) else LEFT, fill=fill)
         row += 1
 
     ws.freeze_panes = "A3"
@@ -728,7 +718,7 @@ def find_input_file(data_dir="data"):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="全国ダム地質DB 地質推定可能性分析 v1",
+        description="全国ダム地質DB 地質推定可能性分析 v3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "例:\n"
@@ -769,25 +759,30 @@ def main():
 
     wb_in = load_workbook(input_path)
     dams, glossary = load_data(wb_in)
-    hok_count = sum(1 for d in dams if d["pref"].startswith("北海道"))
-    has = sum(1 for d in dams if d["layer_count"] > 0)
-    print(f"総ダム数: {len(dams)} / データあり: {has} / 北海道: {hok_count} / 北海道以外: {len(dams)-hok_count}")
+
+    hokdev = [d for d in dams if d["pref"].startswith("北海道") and d["mgr_code"] == 1]
+    ref_set, ref_detail = build_ref_set(hokdev)
+
+    g1_cnt = sum(1 for d in dams if d["pref"].startswith("北海道") and d["mgr_code"] != 1)
+    g2_cnt = sum(1 for d in dams if not d["pref"].startswith("北海道"))
+    print(f"総ダム数: {len(dams)}")
+    print(f"  北海道開発局（リファレンス）: {len(hokdev)}件 / リファレンスsymbol: {len(ref_set)}種")
+    print(f"  グループ１（北海道内・開発局外）: {g1_cnt}件")
+    print(f"  グループ２（北海道以外）: {g2_cnt}件")
 
     wb_out = Workbook()
     wb_out.remove(wb_out.active)
 
-    print("A1 北海道地質推定分析...")
-    write_a1(wb_out, dams, glossary)
-    print("A2 全国地質推定分析...")
-    write_a2(wb_out, dams, glossary)
-    print("A3 情報充実推奨100ダム...")
-    write_a3(wb_out, dams, glossary)
-    print("A4 管理者別カバレッジ...")
-    write_a4(wb_out, dams, glossary)
-    print("A5 都道府県×地質層マトリクス...")
-    write_a5(wb_out, dams, glossary)
-    print("A6 層別空白補完分析...")
-    write_a6(wb_out, dams, glossary)
+    print("C1 北海道開発局リファレンス...")
+    write_c1(wb_out, hokdev, glossary, ref_set, ref_detail)
+    print("C2 グループ1推定可能性（北海道内・開発局外）...")
+    write_c2(wb_out, dams, ref_set)
+    print("C3 グループ2推定可能性（北海道以外）...")
+    write_c3(wb_out, dams, ref_set)
+    print("D1 調査優先ダムリスト...")
+    write_d1(wb_out, dams, ref_set)
+    print("D2 未掲載Symbol調査効果...")
+    write_d2(wb_out, dams, ref_set)
 
     wb_out.save(output_path)
     print(f"\n保存完了: {output_path}")
