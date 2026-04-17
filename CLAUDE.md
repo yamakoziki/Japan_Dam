@@ -53,8 +53,10 @@ Excel (dam locations) → firstset/作業.py → GeoNAVI API → Excel (geology 
 ```
 
 ### Directory Layout
-- `firstset/` — preserved artifacts from the first completed run: `作業.py` (canonical ETL script), `zendam31_nodata.xlsx` (input), `出力20260412.xlsx` (output), `作業ログ.csv` (run log)
-- `data/` — master input Excel files; `zendam31_fixed.xlsx` is the primary input for analysis
+- `firstset/` — preserved artifacts from the first completed run: `作業.py` (canonical ETL script), `zendam31_nodata.xlsx` (input), `出力20260412.xlsx` (output), `作業ログ.csv` (run log), `zendam31_fixed.xlsx` (copy of master)
+- `data/` — master input Excel files; `zendam31_fixed.xlsx` is the authoritative input for `分析2.py`
+- `anarize/` — output directory for `分析2.py` analysis results (Excel)
+- `report/` — static documents: analysis reports and script specs (`.docx`)
 - `index.html` / `dam_search.html` — identical files; the browser search UI
 
 ### Excel Data Structure
