@@ -36,6 +36,10 @@ python3 firstset/作業.py --input firstset/zendam31_nodata.xlsx --output output
 
 **Statistical analysis — `分析2.py`:**
 ```bash
+# Auto-detect input from data/ folder (looks for xlsx with both required sheets)
+python3 分析2.py
+
+# Or specify explicitly; output defaults to data/分析結果_YYYYMMDD_HHMM.xlsx
 python3 分析2.py --input data/zendam31_fixed.xlsx --output 分析報告書.xlsx
 ```
 
@@ -55,7 +59,7 @@ Excel (dam locations) → firstset/作業.py → GeoNAVI API → Excel (geology 
 ### Directory Layout
 - `firstset/` — preserved artifacts from the first completed run: `作業.py` (canonical ETL script), `zendam31_nodata.xlsx` (input), `出力20260412.xlsx` (output), `作業ログ.csv` (run log), `zendam31_fixed.xlsx` (copy of master)
 - `data/` — master input Excel files; `zendam31_fixed.xlsx` is the authoritative input for `分析2.py`
-- `anarize/` — output directory for `分析2.py` analysis results (Excel)
+- `anarize/` — legacy output directory; `分析2.py` now defaults to saving in `data/` as `分析結果_YYYYMMDD_HHMM.xlsx`
 - `report/` — static documents: analysis reports and script specs (`.docx`)
 - `index.html` / `dam_search.html` — identical files; the browser search UI
 
@@ -94,7 +98,7 @@ Symbols follow the pattern `{era}_{rocktype}_{modifier}` (underscore-separated).
 - 3-item: full symbol
 
 ### Analysis Sheets (`分析2.py`)
-Generates 7 sheets: `S1_Symbol階層分析`, `S2_強度透水性マトリクス`, `S3_Symbol類似グループ`, `S4_2項目組合せ`, `S5_北海道60ダム`, `S6_全国100ダム選定`, `S7_カバレッジ比較`.
+Generates 8 sheets: `S1_Symbol階層分析`, `S2_強度透水性マトリクス`, `S3_Symbol類似グループ`, `S4_2項目組合せ`, `S5_北海道60ダム`, `S6_全国100ダム選定`, `S7_カバレッジ比較`, `S8_北海道開発局ダム`.
 
 - Hokkaido 60 dams = Hokkaido × Ministry of Land, Infrastructure, Transport and Tourism managed (top 60 with data out of ~74)
 - National 100 dams = selected from non-Hokkaido dams for geological diversity
