@@ -43,6 +43,15 @@ python3 分析2.py
 python3 分析2.py --input data/zendam31_fixed.xlsx --output 分析報告書.xlsx
 ```
 
+**Estimability analysis — `分析3.py`:**
+```bash
+# Auto-detect input from data/ folder; output defaults to data/分析3結果_YYYYMMDD_HHMM.xlsx
+python3 分析3.py
+
+# Or specify explicitly
+python3 分析3.py --input data/zendam31_fixed.xlsx --output 分析3報告書.xlsx
+```
+
 **Web interface:** open `index.html` (or the identical `dam_search.html`) directly in a browser, then load an Excel file via the UI.
 
 ## Architecture
@@ -98,10 +107,19 @@ Symbols follow the pattern `{era}_{rocktype}_{modifier}` (underscore-separated).
 - 3-item: full symbol
 
 ### Analysis Sheets (`分析2.py`)
-Generates 8 sheets: `S1_Symbol階層分析`, `S2_強度透水性マトリクス`, `S3_Symbol類似グループ`, `S4_2項目組合せ`, `S5_北海道60ダム`, `S6_全国100ダム選定`, `S7_カバレッジ比較`, `S8_北海道開発局ダム`.
+Generates 8 sheets: `S1_Symbol階層分析`, `S2_強度透水性マトリクス`, `S3_Symbol類似グループ`, `S4_2項目組合せ`, `S5_北海道開発局ダム`, `S6_全国100ダム選定`, `S7_カバレッジ比較`, `S8_北海道開発局ダム詳細`.
 
-- Hokkaido 60 dams = Hokkaido × Ministry of Land, Infrastructure, Transport and Tourism managed (top 60 with data out of ~74)
+- Hokkaido dev bureau dams (S5/S8) = Hokkaido × mgr_code=1 (MLIT), all records with data — no count cap
 - National 100 dams = selected from non-Hokkaido dams for geological diversity
+
+### Analysis Sheets (`分析3.py`)
+Generates 5 sheets using Hokkaido dev bureau symbols as a reference set to evaluate estimability of other dams:
+
+- `C1_北海道開発局リファレンス` — reference symbol set (Hokkaido dev bureau dams)
+- `C2_グループ1推定可能性` — estimability for Hokkaido non-dev-bureau dams
+- `C3_グループ2推定可能性` — estimability for non-Hokkaido dams
+- `D1_調査優先ダムリスト` — prioritized survey list scored by expansion value (how many other dams benefit if this dam's unknown symbols are resolved)
+- `D2_未掲載Symbol調査効果` — per-unknown-symbol analysis of survey impact
 
 **Key metrics:**
 - Bearing capacity score (`bearing_cap`): 1–5 (low → high)
