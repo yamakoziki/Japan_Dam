@@ -128,3 +128,12 @@ Generates 5 sheets using Hokkaido dev bureau symbols as a reference set to evalu
 
 ### Logging
 All ETL runs emit a CSV log tracking per-row status (success/error/skipped), API search radius used, and error messages. Use `--retry-log` to re-process only failed rows from a prior log.
+
+### Web UI (`index.html`)
+Pure single-file HTML/JS — no server, no build step, no npm. Reads the Excel file entirely client-side via SheetJS (`xlsx.js`) loaded from CDN. Also supports drag-and-drop. Links out to Google Maps and GeoNavi (AIST) per dam from coordinates in the data.
+
+### Code Sharing Between Analysis Scripts
+`分析2.py` and `分析3.py` share no modules. `BEARING_SCORE`, `PERM_SCORE`, all openpyxl style constants (`HDR_FILL`, `HDR_FONT`, etc.), and `LAYER_ID_COL` are copy-pasted verbatim in both files. When updating scoring logic or styles, both files must be edited.
+
+### `anarize/` Directory
+Legacy output directory, now empty. `分析2.py` was updated to write output to `data/` instead.

@@ -315,9 +315,8 @@ td.mono { font-family: var(--mono); }
       </div>
       <div class="sec-body">
         <div>
-          <label class="lbl">地質区分コード検索（V列・ワイルドカード可）</label>
-          <input type="text" id="fGeoComp" placeholder="例: *GR* かつ *VL*　→ GRとVL両方を含む" oninput="applyFilters()" style="font-family:var(--mono)">
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">* = 任意の文字列　? = 任意の1文字　複数層の区切りは \　複数条件は「かつ」で区切る（AND検索）</div>
+          <label class="lbl">Symbol検索（全層対象・ワイルドカード可）</label>
+          <input type="text" id="fSymbol" placeholder="例: Pre-N_GR*　* = 任意　? = 1文字" oninput="applyFilters()" style="font-family:var(--mono)">
         </div>
         <div>
           <label class="lbl">地質時代（全層いずれかに一致）</label>
@@ -650,7 +649,7 @@ function applyFilters() {
   const type     = document.getElementById('fType').value;
   const manager  = document.getElementById('fManager').value;
   const purpose  = document.getElementById('fPurpose').value.trim().toLowerCase();
-  const geoComp  = document.getElementById('fGeoComp').value.trim();
+  const symbolQ  = document.getElementById('fSymbol').value.trim();
   const hMin     = parseFloat(document.getElementById('fHeightMin').value) || null;
   const hMax     = parseFloat(document.getElementById('fHeightMax').value) || null;
   const yMin     = parseFloat(document.getElementById('fYearMin').value) || null;
@@ -658,13 +657,10 @@ function applyFilters() {
 
   const bureauPrefs = bureau ? getPrefForBureau(bureau) : null;
 
-  // geo_comp wildcard: 「かつ」で分割し全パターンに一致（AND）
-  let geoPatterns = geoComp
-    ? geoComp.split(/かつ/).map(p => p.trim()).filter(Boolean)
-    : [];
-  geoPatterns = geoPatterns.map(p =>
-    (p && !p.includes('*') && !p.includes('?')) ? '*' + p + '*' : p
-  );
+  // symbol wildcard: ワイルドカードなしは部分一致とする
+  const symbolPat = symbolQ
+    ? ((!symbolQ.includes('*') && !symbolQ.includes('?')) ? '*' + symbolQ + '*' : symbolQ)
+    : null;
 
   // Checkbox groups
   const eras   = getChecked('cbEra');
@@ -684,8 +680,8 @@ function applyFilters() {
     const yr = n(d,'完成年度');
     if (yMin !== null && (isNaN(yr) || yr < yMin)) return false;
     if (yMax !== null && (isNaN(yr) || yr > yMax)) return false;
-    // geo_comp ワイルドカード検索（AND: 全パターンに一致）
-    if (geoPatterns.length && !geoPatterns.every(p => wildcardMatch(p, v(d,'geo_comp')))) return false;
+    // symbol ワイルドカード検索（全5層いずれかに一致）
+    if (symbolPat && !['1','2','3','4','5'].some(ln => wildcardMatch(symbolPat, v(d,`symbol-${ln}`)))) return false;
     // 時代・岩種：同一層（同じサフィックス）内でAND一致
     if (eras.length || rocks.length) {
       const layerMatch = ['1','2','3','4','5'].some(n => {
@@ -716,7 +712,7 @@ function resetFilters() {
   document.getElementById('fType').value = '';
   document.getElementById('fManager').value = '';
   document.getElementById('fPurpose').value = '';
-  document.getElementById('fGeoComp').value = '';
+  document.getElementById('fSymbol').value = '';
   document.getElementById('fHeightMin').value = '';
   document.getElementById('fHeightMax').value = '';
   document.getElementById('fYearMin').value = '';
@@ -958,6 +954,7 @@ function showDetail(d, tr) {
       <div class="dp-grid">
         <div class="dp-row"><span class="dp-key">位置情報精度</span><span class="dp-val">${v(d,'位置情報精度')||'—'}</span></div>
         ${v(d,'緯度') && v(d,'経度') ? `<div class="dp-row full"><span class="dp-key">地図で見る</span><span class="dp-val" style="display:flex;gap:12px;flex-wrap:wrap"><a href="https://maps.google.com/?q=${v(d,'緯度')},${v(d,'経度')}" target="_blank" style="color:var(--accent);text-decoration:none">📍 Google Maps ↗</a><a href="https://gbank.gsj.jp/geonavi/geonavi.php?lat=${v(d,'緯度')}&lon=${v(d,'経度')}&z=13" target="_blank" style="color:var(--accent2);text-decoration:none">🪨 地質Navi (AIST) ↗</a></span></div>` : ''}
+        ${v(d,'ダム地質URL') ? `<div class="dp-row full"><span class="dp-key">ダム地質資料</span><span class="dp-val"><a href="${v(d,'ダム地質URL')}" target="_blank" rel="noopener" style="color:var(--accent4);text-decoration:none">🗂 ダム地質URL ↗</a></span></div>` : ''}
       </div>
     </div>
   `;
