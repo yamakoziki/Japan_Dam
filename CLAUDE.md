@@ -67,8 +67,8 @@ Excel (dam locations) → firstset/作業.py → GeoNAVI API → Excel (geology 
 
 ### Directory Layout
 - `firstset/` — preserved artifacts from the first completed run: `作業.py` (canonical ETL script), `zendam31_nodata.xlsx` (input), `出力20260412.xlsx` (output), `作業ログ.csv` (run log), `zendam31_fixed.xlsx` (copy of master)
-- `data/` — master input `zendam31_fixed.xlsx` (authoritative input for analysis scripts) plus documentation files (`.docx`) that duplicate what is in `report/`
-- `anarize/` — legacy output directory, now empty; `分析2.py` defaults to saving in `data/` as `分析結果_YYYYMMDD_HHMM.xlsx`
+- `data/` — master input `zendam31_fixed.xlsx` (authoritative input for analysis scripts)
+- `anarize/` — legacy output directory; `分析2.py` defaults to saving in `data/` as `分析結果_YYYYMMDD_HHMM.xlsx`
 - `report/` — analysis reports and script specs (`.docx`), plus reference xlsx outputs (`分析2結果py2.xlsx`, `分析3結果py3.xlsx`)
 - `index.html` / `dam_search.html` — identical files; the browser search UI
 
@@ -136,4 +136,4 @@ Pure single-file HTML/JS — no server, no build step, no npm. Reads the Excel f
 `分析2.py` and `分析3.py` share no modules. `BEARING_SCORE`, `PERM_SCORE`, all openpyxl style constants (`HDR_FILL`, `HDR_FONT`, etc.), and `LAYER_ID_COL` are copy-pasted verbatim in both files. When updating scoring logic or styles, both files must be edited.
 
 ### `anarize/` Directory
-Legacy output directory, now empty. `分析2.py` was updated to write output to `data/` instead.
+Legacy output directory. `分析2.py` was updated to write output to `data/` instead, but old runs may still have files here.
